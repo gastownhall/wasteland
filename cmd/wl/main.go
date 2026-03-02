@@ -114,7 +114,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 }
 
 // resolveWasteland resolves the active wasteland config from --wasteland flag or auto-selection.
-// If --local-db is set, the backend is forced to local regardless of config.
+// Default is remote (API-only). Pass --local-db to use the local dolt database.
 func resolveWasteland(cmd *cobra.Command) (*federation.Config, error) {
 	explicit, _ := cmd.Flags().GetString("wasteland")
 	store := federation.NewConfigStore()
@@ -124,6 +124,8 @@ func resolveWasteland(cmd *cobra.Command) (*federation.Config, error) {
 	}
 	if localDB, _ := cmd.Flags().GetBool("local-db"); localDB {
 		cfg.Backend = federation.BackendLocal
+	} else {
+		cfg.Backend = federation.BackendRemote
 	}
 	return cfg, nil
 }
