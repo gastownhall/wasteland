@@ -90,10 +90,16 @@ func (l *LocalDB) PushWithSync(stdout io.Writer) error {
 // CanWildWest returns nil — local databases support wild-west mode.
 func (l *LocalDB) CanWildWest() error { return nil }
 
-// Sync pulls latest from upstream. In PR mode, resets main to upstream.
+// Sync pulls latest from upstream. In PR mode, resets main to upstream
+// and fetches origin branches so PR mutations are visible via AS OF.
 func (l *LocalDB) Sync() error {
 	if l.mode == "pr" {
-		return commons.ResetMainToUpstream(l.dir)
+		if err := commons.ResetMainToUpstream(l.dir); err != nil {
+			return err
+		}
+		_ = commons.FetchRemote(l.dir, "origin")
+		_ = commons.TrackOriginBranches(l.dir, "wl/")
+		return nil
 	}
 	return commons.PullUpstream(l.dir)
 }

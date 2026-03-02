@@ -266,6 +266,68 @@ func ListBranches(dbDir, prefix string) ([]string, error) {
 	return branches, nil
 }
 
+// TrackOriginBranches creates local tracking branches for any
+// remotes/origin/{prefix}* branches that don't already exist locally.
+// This makes origin branch data available to AS OF queries.
+func TrackOriginBranches(dbDir, prefix string) error {
+	escaped := strings.ReplaceAll(prefix, "'", "''")
+	remotePrefix := "remotes/origin/" + prefix
+
+	// Get remote branches.
+	out, err := DoltSQLQuery(dbDir, fmt.Sprintf(
+		"SELECT name FROM dolt_remote_branches WHERE name LIKE '%s%%' ORDER BY name",
+		strings.ReplaceAll(remotePrefix, "'", "''"),
+	))
+	if err != nil {
+		return nil // best-effort; remote may not exist
+	}
+	var remoteBranches []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n")[1:] {
+		name := strings.TrimSpace(line)
+		if name != "" {
+			remoteBranches = append(remoteBranches, name)
+		}
+	}
+	if len(remoteBranches) == 0 {
+		return nil
+	}
+
+	// Get local branches to avoid duplicates.
+	localBranches, _ := ListBranches(dbDir, prefix)
+	localSet := make(map[string]bool, len(localBranches))
+	for _, b := range localBranches {
+		localSet[b] = true
+	}
+
+	// Create local tracking branches for any missing ones.
+	for _, remote := range remoteBranches {
+		local := strings.TrimPrefix(remote, "remotes/origin/")
+		if localSet[local] {
+			continue
+		}
+		// dolt branch <local> <remote-ref>
+		cmd := exec.Command("dolt", "branch", local, remote)
+		cmd.Dir = dbDir
+		_ = cmd.Run() // best-effort
+	}
+
+	// Also prune local branches whose remote counterpart no longer exists.
+	remoteSet := make(map[string]bool, len(remoteBranches))
+	for _, r := range remoteBranches {
+		remoteSet[strings.TrimPrefix(r, "remotes/origin/")] = true
+	}
+	for _, local := range localBranches {
+		if !strings.HasPrefix(local, escaped) {
+			continue
+		}
+		if !remoteSet[local] {
+			_ = DeleteBranch(dbDir, local) // best-effort
+		}
+	}
+
+	return nil
+}
+
 // MergeBranch merges a branch into main. If the merge produces conflicts
 // it aborts and returns an error. The caller must already be on main.
 func MergeBranch(dbDir, branch string) error {

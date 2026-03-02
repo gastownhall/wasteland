@@ -129,10 +129,18 @@ func runBrowseLocal(stdout, stderr io.Writer, cfg *federation.Config, filter com
 	}
 	sp := style.StartSpinner(spinnerOut, "Syncing with upstream...")
 	err := commons.PullUpstream(cfg.LocalDir)
-	sp.Stop()
 	if err != nil {
+		sp.Stop()
 		return fmt.Errorf("pulling upstream: %w", err)
 	}
+
+	// Fetch origin branches and create local tracking branches so
+	// BrowseWantedBranchAware can see PR-mode mutations via AS OF.
+	if cfg.ResolveMode() == federation.ModePR {
+		_ = commons.FetchRemote(cfg.LocalDir, "origin")
+		_ = commons.TrackOriginBranches(cfg.LocalDir, "wl/")
+	}
+	sp.Stop()
 
 	db := openDB(cfg.LocalDir)
 	client := sdk.New(sdk.ClientConfig{
