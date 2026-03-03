@@ -46,7 +46,11 @@ Examples:
 	cmd.Flags().StringVar(&title, "title", "", "Title of the wanted item (required)")
 	cmd.Flags().StringVarP(&description, "description", "d", "", "Detailed description")
 	cmd.Flags().StringVar(&project, "project", "", "Project name (e.g., gastown, beads)")
-	cmd.Flags().StringVar(&itemType, "type", "", "Item type: feature, bug, design, rfc, docs, inference")
+	typeHelp := "Item type: feature, bug, design, rfc, docs"
+	if inferGateEnabled() {
+		typeHelp += ", inference"
+	}
+	cmd.Flags().StringVar(&itemType, "type", "", typeHelp)
 	cmd.Flags().IntVar(&priority, "priority", 2, "Priority: 0=critical, 1=high, 2=medium, 3=low, 4=backlog")
 	cmd.Flags().StringVar(&effort, "effort", "medium", "Effort level: trivial, small, medium, large, epic")
 	cmd.Flags().StringVar(&tags, "tags", "", "Comma-separated tags (e.g., 'go,auth,federation')")
@@ -55,7 +59,11 @@ Examples:
 	_ = cmd.MarkFlagRequired("title")
 	_ = cmd.RegisterFlagCompletionFunc("project", completeProjectNames)
 	_ = cmd.RegisterFlagCompletionFunc("type", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
-		return []string{"feature", "bug", "design", "rfc", "docs", "inference"}, cobra.ShellCompDirectiveNoFileComp
+		types := []string{"feature", "bug", "design", "rfc", "docs"}
+		if inferGateEnabled() {
+			types = append(types, "inference")
+		}
+		return types, cobra.ShellCompDirectiveNoFileComp
 	})
 	_ = cmd.RegisterFlagCompletionFunc("effort", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 		return []string{"trivial", "small", "medium", "large", "epic"}, cobra.ShellCompDirectiveNoFileComp

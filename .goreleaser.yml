@@ -3,6 +3,8 @@ version: 2
 builds:
   - main: ./cmd/wl
     binary: wl
+    ldflags:
+      - -X main.inferEnabled=false
     env:
       - CGO_ENABLED=0
     goos:

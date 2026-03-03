@@ -80,7 +80,12 @@ EXAMPLES:
 
 	cmd.Flags().StringVar(&project, "project", "", "Filter by project (e.g., gastown, beads, hop)")
 	cmd.Flags().StringVar(&status, "status", "", "Filter by status (open, claimed, in_review, completed, withdrawn); empty = all")
-	cmd.Flags().StringVar(&itemType, "type", "", "Filter by type (feature, bug, design, rfc, docs, inference)")
+	typeHelp := "Filter by type (feature, bug, design, rfc, docs"
+	if inferGateEnabled() {
+		typeHelp += ", inference"
+	}
+	typeHelp += ")"
+	cmd.Flags().StringVar(&itemType, "type", "", typeHelp)
 	cmd.Flags().IntVar(&priority, "priority", -1, "Filter by priority (0=critical, 2=medium, 4=backlog)")
 	cmd.Flags().IntVar(&limit, "limit", 50, "Maximum items to display")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as JSON")
@@ -95,7 +100,11 @@ EXAMPLES:
 		return []string{"open", "claimed", "in_review", "completed", "withdrawn"}, cobra.ShellCompDirectiveNoFileComp
 	})
 	_ = cmd.RegisterFlagCompletionFunc("type", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
-		return []string{"feature", "bug", "design", "rfc", "docs", "inference"}, cobra.ShellCompDirectiveNoFileComp
+		types := []string{"feature", "bug", "design", "rfc", "docs"}
+		if inferGateEnabled() {
+			types = append(types, "inference")
+		}
+		return types, cobra.ShellCompDirectiveNoFileComp
 	})
 	_ = cmd.RegisterFlagCompletionFunc("view", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 		return []string{"mine", "all", "upstream"}, cobra.ShellCompDirectiveNoFileComp

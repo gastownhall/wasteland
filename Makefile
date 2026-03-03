@@ -16,15 +16,19 @@ VERSION    := $(shell git describe --tags --always --dirty 2>/dev/null || echo "
 COMMIT     := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
+# Set to "false" to hide inference UI from CLI and web.
+INFER_ENABLED ?= true
+
 LDFLAGS := -X main.version=$(VERSION) \
            -X main.commit=$(COMMIT) \
-           -X main.date=$(BUILD_TIME)
+           -X main.date=$(BUILD_TIME) \
+           -X main.inferEnabled=$(INFER_ENABLED)
 
 .PHONY: build build-go web check check-all lint fmt-check fmt vet test test-integration test-integration-offline test-cover cover install install-tools setup clean web-check web-test
 
 ## web: build web UI (requires bun)
 web:
-	cd web && bun install --frozen-lockfile && bun run build
+	cd web && VITE_INFER_ENABLED=$(INFER_ENABLED) bun install --frozen-lockfile && bun run build
 
 ## build: compile wl binary with embedded web UI
 build: web

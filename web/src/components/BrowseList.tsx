@@ -69,7 +69,7 @@ export function BrowseList() {
           setShowForm(true);
           break;
         case "i":
-          setShowInferForm(true);
+          if (__INFER_ENABLED__) setShowInferForm(true);
           break;
         case "/":
           e.preventDefault();
@@ -87,9 +87,11 @@ export function BrowseList() {
       <div className={styles.header}>
         <h2 className={styles.heading}>Wanted Board</h2>
         <div className={styles.headerActions}>
-          <button type="button" className={styles.inferBtn} onClick={() => setShowInferForm(true)}>
-            + Infer
-          </button>
+          {__INFER_ENABLED__ && (
+            <button type="button" className={styles.inferBtn} onClick={() => setShowInferForm(true)}>
+              + Infer
+            </button>
+          )}
           <button type="button" className={styles.postBtn} onClick={() => setShowForm(true)}>
             + Post
           </button>
@@ -201,7 +203,7 @@ export function BrowseList() {
         />
       )}
 
-      {showInferForm && (
+      {__INFER_ENABLED__ && showInferForm && (
         <WantedForm
           mode="inference"
           onClose={() => setShowInferForm(false)}

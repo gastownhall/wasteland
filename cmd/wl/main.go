@@ -14,10 +14,15 @@ import (
 
 // Version metadata injected via ldflags.
 var (
-	version = "dev"
-	commit  = "unknown"
-	date    = "unknown"
+	version      = "dev"
+	commit       = "unknown"
+	date         = "unknown"
+	inferEnabled = "true" // set to "false" via ldflags to hide inference UI
 )
+
+func inferGateEnabled() bool {
+	return inferEnabled != "false"
+}
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -106,11 +111,13 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newTUICmd(stdout, stderr),
 		newServeCmd(stdout, stderr),
 		newDoctorCmd(stdout, stderr),
-		newInferCmd(stdout, stderr),
 		newLeaderboardCmd(stdout, stderr),
 		newProfileCmd(stdout, stderr),
 		newVersionCmd(stdout),
 	)
+	if inferGateEnabled() {
+		root.AddCommand(newInferCmd(stdout, stderr))
+	}
 	return root
 }
 
