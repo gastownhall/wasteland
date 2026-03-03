@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -53,6 +54,9 @@ func resolvePort(cmd *cobra.Command) int {
 }
 
 func runServe(cmd *cobra.Command, stdout, stderr io.Writer) error {
+	logger := slog.New(slog.NewJSONHandler(stdout, nil))
+	slog.SetDefault(logger)
+
 	port := resolvePort(cmd)
 	devMode, _ := cmd.Flags().GetBool("dev")
 
@@ -78,7 +82,7 @@ func runServe(cmd *cobra.Command, stdout, stderr io.Writer) error {
 
 		if cfg.ResolveMode() == federation.ModePR {
 			if err := localDB.PushMain(io.Discard); err != nil {
-				fmt.Fprintf(stderr, "  warning: could not sync origin/main: %v\n", err)
+				slog.Warn("could not sync origin/main", "error", err)
 			}
 		}
 	} else {
@@ -97,7 +101,7 @@ func runServe(cmd *cobra.Command, stdout, stderr io.Writer) error {
 		err = remoteDB.Sync()
 		sp.Stop()
 		if err != nil {
-			fmt.Fprintf(stderr, "  warning: fork sync skipped: %v\n", err)
+			slog.Warn("fork sync skipped", "error", err)
 		}
 	}
 
@@ -158,18 +162,21 @@ func runServe(cmd *cobra.Command, stdout, stderr io.Writer) error {
 
 	generalRL := api.RateLimit(api.NewRateLimiter(120, 120, time.Minute))
 	bodyLimit := api.MaxBytesBody(64 << 10) // 64 KB
-	handler := api.SecurityHeaders(generalRL(bodyLimit(api.SPAHandler(server, web.Assets))))
+	handler := api.RequestLog(logger)(api.SecurityHeaders(generalRL(bodyLimit(api.SPAHandler(server, web.Assets)))))
 	if devMode {
 		handler = api.CORSMiddleware(handler)
 	}
 
 	addr := fmt.Sprintf(":%d", port)
-	fmt.Fprintf(stdout, "Wasteland web UI listening on http://localhost%s\n", addr)
+	slog.Info("server started", "mode", "self-sovereign", "addr", addr)
 	srv := &http.Server{Addr: addr, Handler: handler, MaxHeaderBytes: 1 << 20} //nolint:gosec // bind addr is user-controlled via --port flag
 	return srv.ListenAndServe()
 }
 
-func runServeHosted(cmd *cobra.Command, stdout, stderr io.Writer) error {
+func runServeHosted(cmd *cobra.Command, stdout, _ io.Writer) error {
+	logger := slog.New(slog.NewJSONHandler(stdout, nil))
+	slog.SetDefault(logger)
+
 	port := resolvePort(cmd)
 	devMode, _ := cmd.Flags().GetBool("dev")
 
@@ -206,14 +213,14 @@ func runServeHosted(cmd *cobra.Command, stdout, stderr io.Writer) error {
 	hostedServer := hosted.NewServer(resolver, sessions, nangoClient, sessionSecret)
 
 	bodyLimit := api.MaxBytesBody(64 << 10) // 64 KB
-	handler := api.SecurityHeaders(bodyLimit(hostedServer.Handler(apiServer, web.Assets)))
+	handler := api.RequestLog(logger)(api.SecurityHeaders(bodyLimit(hostedServer.Handler(apiServer, web.Assets))))
 	if devMode {
 		handler = api.CORSMiddleware(handler)
 	}
 
 	addr := fmt.Sprintf(":%d", port)
-	fmt.Fprintf(stdout, "Wasteland hosted mode listening on http://localhost%s\n", addr)
-	fmt.Fprintf(stderr, "  Nango integration: %s\n", nangoClient.IntegrationID())
+	slog.Info("server started", "mode", "hosted", "addr", addr)
+	slog.Info("nango configured", "integration_id", nangoClient.IntegrationID())
 	srv := &http.Server{Addr: addr, Handler: handler, MaxHeaderBytes: 1 << 20} //nolint:gosec // bind addr is user-controlled via --port flag
 	return srv.ListenAndServe()
 }

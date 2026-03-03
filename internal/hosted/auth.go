@@ -2,6 +2,7 @@ package hosted
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -56,6 +57,7 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 		// Read and verify session cookie.
 		sessionID, connectionID, ok := ReadSessionCookie(r, s.sessionSecret)
 		if !ok {
+			slog.Warn("auth: invalid session cookie", "path", r.URL.Path)
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
 			return
 		}
@@ -65,11 +67,13 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 			// Session not in memory — try to re-hydrate from Nango.
 			if connectionID == "" {
 				// Old-format cookie without connectionID — can't re-hydrate.
+				slog.Warn("auth: session expired (no connection_id)", "path", r.URL.Path)
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "session expired"})
 				return
 			}
 			// Validate the connection is still active in Nango.
 			if _, _, err := s.nango.GetConnection(connectionID); err != nil {
+				slog.Warn("auth: session expired (nango validation failed)", "error", err, "path", r.URL.Path)
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "session expired"})
 				return
 			}
@@ -85,6 +89,7 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 		// Resolve the per-user Workspace.
 		workspace, err := s.resolver.Resolve(session)
 		if err != nil {
+			slog.Warn("auth: failed to resolve workspace", "error", err, "path", r.URL.Path)
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "failed to resolve workspace: " + err.Error()})
 			return
 		}

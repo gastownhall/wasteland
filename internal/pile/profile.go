@@ -3,7 +3,7 @@ package pile
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 
 	"github.com/julianknutsen/wasteland/internal/commons"
@@ -105,7 +105,7 @@ func QueryProfile(p RowQuerier, handle string) (*Profile, error) {
 	sheetStr := toString(row["sheet_json"])
 	if sheetStr != "" {
 		if err := parseSheetJSON(sheetStr, profile); err != nil {
-			log.Printf("warning: failed to parse sheet_json for %s: %v", handle, err)
+			slog.Warn("failed to parse sheet_json", "handle", handle, "error", err)
 		}
 	}
 

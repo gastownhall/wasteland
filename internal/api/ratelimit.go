@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -101,6 +102,7 @@ func RateLimit(rl *RateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !rl.Allow(clientIP(r)) {
+				slog.Warn("rate limit exceeded", "client_ip", clientIP(r), "method", r.Method, "path", r.URL.Path)
 				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 				return
 			}
