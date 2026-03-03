@@ -107,3 +107,49 @@
 .loadingText {
   color: var(--dim);
 }
+
+/* Prerequisites prose */
+.prose {
+  color: var(--dim);
+  font-size: var(--text-base);
+  line-height: 1.6;
+  margin-bottom: var(--space-3);
+}
+
+/* Numbered steps list */
+.stepList {
+  color: var(--fg);
+  font-size: var(--text-base);
+  line-height: 1.8;
+  margin: 0;
+  padding-left: var(--space-5);
+}
+
+/* Per-field help text */
+.fieldHint {
+  color: var(--dim);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  margin-top: var(--space-1);
+}
+
+/* Advanced toggle button */
+.advancedToggle {
+  background: none;
+  border: none;
+  color: var(--dim);
+  font-size: var(--text-sm);
+  font-family: var(--font-heading);
+  cursor: pointer;
+  padding: var(--space-1) 0;
+  margin-bottom: var(--space-2);
+}
+
+.advancedToggle:hover {
+  color: var(--brass);
+}
+
+/* Container for advanced fields */
+.advancedBody {
+  padding-top: var(--space-2);
+}

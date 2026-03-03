@@ -10,18 +10,25 @@ export function ConnectPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { refresh } = useWasteland();
-  const [step, setStep] = useState<"identity" | "connect" | "join">("identity");
+  const [view, setView] = useState<"connect" | "join">("connect");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  // Identity form state.
-  const [rigHandle, setRigHandle] = useState("");
-  const [forkOrg, setForkOrg] = useState("");
+  // Credentials.
+  const [username, setUsername] = useState("");
+  const [apiToken, setApiToken] = useState("");
+
+  // Advanced overrides.
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [rigHandleOverride, setRigHandleOverride] = useState("");
+  const [forkOrgOverride, setForkOrgOverride] = useState("");
   const [forkDB, setForkDB] = useState("wl-commons");
   const [upstream, setUpstream] = useState("hop/wl-commons");
 
-  // DoltHub token step.
-  const [apiToken, setApiToken] = useState("");
+  // Join form state (for /join route).
+  const [joinForkOrg, setJoinForkOrg] = useState("");
+  const [joinForkDB, setJoinForkDB] = useState("wl-commons");
+  const [joinUpstream, setJoinUpstream] = useState("hop/wl-commons");
 
   // Check if already authenticated on mount.
   useEffect(() => {
@@ -29,9 +36,8 @@ export function ConnectPage() {
       try {
         const status = await authStatus();
         if (status.authenticated && status.connected) {
-          // If arriving at /join, show the simplified join form.
           if (location.pathname === "/join") {
-            setStep("join");
+            setView("join");
           } else {
             navigate("/", { replace: true });
             return;
@@ -45,39 +51,32 @@ export function ConnectPage() {
     })();
   }, [navigate, location.pathname]);
 
-  const handleIdentitySubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!rigHandle.trim() || !forkOrg.trim() || !forkDB.trim() || !upstream.trim()) {
-      toast.error("All fields are required");
-      return;
-    }
-    setStep("connect");
-  };
-
   const handleConnect = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!username.trim()) {
+      toast.error("DoltHub username is required");
+      return;
+    }
     if (!apiToken.trim()) {
       toast.error("DoltHub API token is required");
       return;
     }
 
+    const effectiveRigHandle = rigHandleOverride.trim() || username.trim();
+    const effectiveForkOrg = forkOrgOverride.trim() || username.trim();
+
     setSubmitting(true);
     try {
-      const endUserId = rigHandle.trim();
-
-      // Create a connect session token and store the token in Nango.
-      const session = await connectSession(endUserId);
+      const session = await connectSession(effectiveRigHandle);
       const nango = initNango(session.token);
       const authResult = await connectDoltHub(nango, session.integration_id, apiToken.trim());
 
-      // Notify the backend to create the session and store config.
-      // Use the actual connectionId assigned by Nango during auth.
       await notifyConnect({
         connection_id: authResult.connectionId,
-        rig_handle: rigHandle.trim(),
-        fork_org: forkOrg.trim(),
-        fork_db: forkDB.trim(),
-        upstream: upstream.trim(),
+        rig_handle: effectiveRigHandle,
+        fork_org: effectiveForkOrg,
+        fork_db: forkDB.trim() || "wl-commons",
+        upstream: upstream.trim() || "hop/wl-commons",
       });
 
       await refresh();
@@ -92,7 +91,7 @@ export function ConnectPage() {
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!forkOrg.trim() || !forkDB.trim() || !upstream.trim()) {
+    if (!joinForkOrg.trim() || !joinForkDB.trim() || !joinUpstream.trim()) {
       toast.error("Fork org, fork DB, and upstream are required");
       return;
     }
@@ -100,9 +99,9 @@ export function ConnectPage() {
     setSubmitting(true);
     try {
       await joinWasteland({
-        fork_org: forkOrg.trim(),
-        fork_db: forkDB.trim(),
-        upstream: upstream.trim(),
+        fork_org: joinForkOrg.trim(),
+        fork_db: joinForkDB.trim(),
+        upstream: joinUpstream.trim(),
       });
 
       await refresh();
@@ -119,9 +118,9 @@ export function ConnectPage() {
 
   return (
     <div className={styles.page}>
-      <h2 className={styles.heading}>{step === "join" ? "Join a Wasteland" : "Connect to Wasteland"}</h2>
+      <h2 className={styles.heading}>{view === "join" ? "Join a Wasteland" : "Connect to Wasteland"}</h2>
 
-      {step === "join" && (
+      {view === "join" && (
         <form onSubmit={handleJoin}>
           <div className={styles.section}>
             <h3 className={styles.sectionTitle}>Wasteland Details</h3>
@@ -131,10 +130,13 @@ export function ConnectPage() {
               <input
                 className={styles.input}
                 type="text"
-                value={upstream}
-                onChange={(e) => setUpstream(e.target.value)}
+                value={joinUpstream}
+                onChange={(e) => setJoinUpstream(e.target.value)}
                 placeholder="org/wl-commons"
               />
+              <span className={styles.fieldHint}>
+                The upstream wasteland to join. Only change for third-party wastelands.
+              </span>
             </label>
 
             <label className={styles.fieldLabel}>
@@ -142,10 +144,13 @@ export function ConnectPage() {
               <input
                 className={styles.input}
                 type="text"
-                value={forkOrg}
-                onChange={(e) => setForkOrg(e.target.value)}
+                value={joinForkOrg}
+                onChange={(e) => setJoinForkOrg(e.target.value)}
                 placeholder="your-dolthub-org"
               />
+              <span className={styles.fieldHint}>
+                DoltHub org where your fork lives. Usually your DoltHub username.
+              </span>
             </label>
 
             <label className={styles.fieldLabel}>
@@ -153,10 +158,13 @@ export function ConnectPage() {
               <input
                 className={styles.input}
                 type="text"
-                value={forkDB}
-                onChange={(e) => setForkDB(e.target.value)}
+                value={joinForkDB}
+                onChange={(e) => setJoinForkDB(e.target.value)}
                 placeholder="wl-commons"
               />
+              <span className={styles.fieldHint}>
+                Name of the forked database. Only change for third-party wastelands.
+              </span>
             </label>
           </div>
 
@@ -171,79 +179,67 @@ export function ConnectPage() {
         </form>
       )}
 
-      {step === "identity" && (
-        <form onSubmit={handleIdentitySubmit}>
-          <div className={styles.section}>
-            <h3 className={styles.sectionTitle}>Identity</h3>
-
-            <label className={styles.fieldLabel}>
-              Rig Handle
-              <input
-                className={styles.input}
-                type="text"
-                value={rigHandle}
-                onChange={(e) => setRigHandle(e.target.value)}
-                placeholder="your-handle"
-              />
-            </label>
-
-            <label className={styles.fieldLabel}>
-              Fork Org
-              <input
-                className={styles.input}
-                type="text"
-                value={forkOrg}
-                onChange={(e) => setForkOrg(e.target.value)}
-                placeholder="your-dolthub-org"
-              />
-            </label>
-
-            <label className={styles.fieldLabel}>
-              Fork DB
-              <input
-                className={styles.input}
-                type="text"
-                value={forkDB}
-                onChange={(e) => setForkDB(e.target.value)}
-                placeholder="wl-commons"
-              />
-            </label>
-
-            <label className={styles.fieldLabel}>
-              Upstream
-              <input
-                className={styles.input}
-                type="text"
-                value={upstream}
-                onChange={(e) => setUpstream(e.target.value)}
-                placeholder="org/wl-commons"
-              />
-            </label>
-          </div>
-
-          <div className={styles.actions}>
-            <button type="submit" className={styles.primaryBtn}>
-              Next
-            </button>
-          </div>
-        </form>
-      )}
-
-      {step === "connect" && (
+      {view === "connect" && (
         <form onSubmit={handleConnect}>
+          {/* Prerequisites */}
           <div className={styles.section}>
-            <h3 className={styles.sectionTitle}>Connect DoltHub</h3>
-            <p className={styles.hint}>
-              Your token is sent directly to{" "}
-              <a href="https://www.nango.dev" target="_blank" rel="noopener noreferrer" className={styles.link}>
-                Nango
+            <h3 className={styles.sectionTitle}>Prerequisites</h3>
+            <p className={styles.prose}>
+              Wasteland uses{" "}
+              <a href="https://www.dolthub.com" target="_blank" rel="noopener noreferrer" className={styles.link}>
+                DoltHub
               </a>
-              , a third-party credentials vault. It is encrypted at rest and never touches the Wasteland server. DoltHub
-              API calls are proxied through Nango, which injects your token — our server never sees it.
+              {"  "}
+              &mdash; a versioned database host &mdash; as its federation layer. You&rsquo;ll need a free account and an
+              API token.
             </p>
+            <ol className={styles.stepList}>
+              <li>
+                Create a DoltHub account at{" "}
+                <a
+                  href="https://www.dolthub.com/signin"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={styles.link}
+                >
+                  dolthub.com/signin
+                </a>
+              </li>
+              <li>
+                Generate an API token at{" "}
+                <a
+                  href="https://www.dolthub.com/settings/credentials"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={styles.link}
+                >
+                  dolthub.com/settings/credentials
+                </a>
+              </li>
+            </ol>
+          </div>
+
+          {/* Credentials */}
+          <div className={styles.section}>
+            <h3 className={styles.sectionTitle}>Credentials</h3>
 
             <label className={styles.fieldLabel}>
-              DoltHub API Token
+              DoltHub Username
+              <input
+                className={styles.input}
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="alice-dev"
+              />
+              <span className={styles.fieldHint}>
+                Your DoltHub username or organization name. This is used as your rig handle and fork organization by
+                default.
+              </span>
+            </label>
+
+            <label className={styles.fieldLabel}>
+              API Token
               <input
                 className={styles.input}
                 type="password"
@@ -251,13 +247,89 @@ export function ConnectPage() {
                 onChange={(e) => setApiToken(e.target.value)}
                 placeholder="your-dolthub-api-token"
               />
+              <span className={styles.fieldHint}>
+                Found at{" "}
+                <a
+                  href="https://www.dolthub.com/settings/credentials"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={styles.link}
+                >
+                  dolthub.com/settings/credentials
+                </a>
+                . Your token is stored securely and never written to disk.
+              </span>
             </label>
           </div>
 
+          {/* Advanced */}
+          <button type="button" className={styles.advancedToggle} onClick={() => setShowAdvanced(!showAdvanced)}>
+            {showAdvanced ? "\u2212 Advanced" : "+ Advanced"}
+          </button>
+
+          {showAdvanced && (
+            <div className={styles.advancedBody}>
+              <div className={styles.section}>
+                <label className={styles.fieldLabel}>
+                  Rig Handle
+                  <input
+                    className={styles.input}
+                    type="text"
+                    value={rigHandleOverride}
+                    onChange={(e) => setRigHandleOverride(e.target.value)}
+                    placeholder={username || "your-handle"}
+                  />
+                  <span className={styles.fieldHint}>
+                    Your identity in the wasteland registry. Defaults to your DoltHub username.
+                  </span>
+                </label>
+
+                <label className={styles.fieldLabel}>
+                  Fork Org
+                  <input
+                    className={styles.input}
+                    type="text"
+                    value={forkOrgOverride}
+                    onChange={(e) => setForkOrgOverride(e.target.value)}
+                    placeholder={username || "your-dolthub-org"}
+                  />
+                  <span className={styles.fieldHint}>
+                    DoltHub org where your fork lives. Defaults to your DoltHub username.
+                  </span>
+                </label>
+
+                <label className={styles.fieldLabel}>
+                  Fork DB
+                  <input
+                    className={styles.input}
+                    type="text"
+                    value={forkDB}
+                    onChange={(e) => setForkDB(e.target.value)}
+                    placeholder="wl-commons"
+                  />
+                  <span className={styles.fieldHint}>
+                    Name of the forked database. Only change for third-party wastelands.
+                  </span>
+                </label>
+
+                <label className={styles.fieldLabel}>
+                  Upstream
+                  <input
+                    className={styles.input}
+                    type="text"
+                    value={upstream}
+                    onChange={(e) => setUpstream(e.target.value)}
+                    placeholder="hop/wl-commons"
+                  />
+                  <span className={styles.fieldHint}>
+                    The upstream wasteland to join. Only change for third-party wastelands.
+                  </span>
+                </label>
+              </div>
+            </div>
+          )}
+
           <div className={styles.actions}>
-            <button type="button" className={styles.secondaryBtn} onClick={() => setStep("identity")}>
-              Back
-            </button>
             <button type="submit" className={styles.primaryBtn} disabled={submitting}>
               {submitting ? "Connecting..." : "Connect"}
             </button>
