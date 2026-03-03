@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"time"
 
 	"github.com/julianknutsen/wasteland/internal/api"
 	"github.com/julianknutsen/wasteland/internal/sdk"
@@ -31,22 +32,26 @@ func NewServer(resolver *WorkspaceResolver, sessions *SessionStore, nango *Nango
 func (s *Server) Handler(apiServer *api.Server, assets fs.FS) http.Handler {
 	mux := http.NewServeMux()
 
-	// Health check for Railway / load balancers.
+	// Rate limiters: strict for auth mutations, general for all traffic.
+	authRL := api.RateLimit(api.NewRateLimiter(10, 10, time.Minute))
+	generalRL := api.RateLimit(api.NewRateLimiter(120, 120, time.Minute))
+
+	// Health check for Railway / load balancers (no rate limit).
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
 
-	// Auth endpoints (no auth middleware required).
-	mux.HandleFunc("POST /api/auth/connect", s.handleConnect)
-	mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
-	mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
-	mux.HandleFunc("POST /api/auth/connect-session", s.handleConnectSession)
-	mux.HandleFunc("POST /api/auth/join", s.handleJoin)
-	mux.HandleFunc("DELETE /api/auth/wastelands/{upstream...}", s.handleLeaveWasteland)
+	// Auth endpoints (no auth middleware required, strict rate limit).
+	mux.Handle("POST /api/auth/connect", authRL(http.HandlerFunc(s.handleConnect)))
+	mux.Handle("GET /api/auth/status", authRL(http.HandlerFunc(s.handleAuthStatus)))
+	mux.Handle("POST /api/auth/logout", authRL(http.HandlerFunc(s.handleLogout)))
+	mux.Handle("POST /api/auth/connect-session", authRL(http.HandlerFunc(s.handleConnectSession)))
+	mux.Handle("POST /api/auth/join", authRL(http.HandlerFunc(s.handleJoin)))
+	mux.Handle("DELETE /api/auth/wastelands/{upstream...}", authRL(http.HandlerFunc(s.handleLeaveWasteland)))
 
-	// All other routes go through auth middleware -> SPA handler.
-	mux.Handle("/", s.AuthMiddleware(api.SPAHandler(apiServer, assets)))
+	// All other routes go through rate limit -> auth middleware -> SPA handler.
+	mux.Handle("/", generalRL(s.AuthMiddleware(api.SPAHandler(apiServer, assets))))
 
 	return mux
 }

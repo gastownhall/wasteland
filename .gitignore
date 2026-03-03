@@ -7,3 +7,4 @@ web/node_modules/
 web/dist/*
 !web/dist/.gitkeep
 web/coverage/
+docs/production-checklist.md

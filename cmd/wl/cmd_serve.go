@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"time"
 
 	"github.com/julianknutsen/wasteland/internal/api"
 	"github.com/julianknutsen/wasteland/internal/backend"
@@ -155,7 +156,8 @@ func runServe(cmd *cobra.Command, stdout, stderr io.Writer) error {
 
 	server := api.New(client)
 
-	handler := api.SPAHandler(server, web.Assets)
+	generalRL := api.RateLimit(api.NewRateLimiter(120, 120, time.Minute))
+	handler := api.SecurityHeaders(generalRL(api.SPAHandler(server, web.Assets)))
 	if devMode {
 		handler = api.CORSMiddleware(handler)
 	}
@@ -201,7 +203,7 @@ func runServeHosted(cmd *cobra.Command, stdout, stderr io.Writer) error {
 	// Build the hosted server and compose handlers.
 	hostedServer := hosted.NewServer(resolver, sessions, nangoClient, sessionSecret)
 
-	handler := hostedServer.Handler(apiServer, web.Assets)
+	handler := api.SecurityHeaders(hostedServer.Handler(apiServer, web.Assets))
 	if devMode {
 		handler = api.CORSMiddleware(handler)
 	}
