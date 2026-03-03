@@ -45,7 +45,7 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 		}
 
 		// Read and verify session cookie.
-		sessionID, ok := ReadSessionCookie(r, s.sessionSecret)
+		sessionID, connectionID, ok := ReadSessionCookie(r, s.sessionSecret)
 		if !ok {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
 			return
@@ -53,8 +53,19 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 
 		session, ok := s.sessions.Get(sessionID)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "session expired"})
-			return
+			// Session not in memory — try to re-hydrate from Nango.
+			if connectionID == "" {
+				// Old-format cookie without connectionID — can't re-hydrate.
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "session expired"})
+				return
+			}
+			// Validate the connection is still active in Nango.
+			if _, _, err := s.nango.GetConnection(connectionID); err != nil {
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "session expired"})
+				return
+			}
+			s.sessions.Restore(sessionID, connectionID)
+			session, _ = s.sessions.Get(sessionID)
 		}
 
 		if session.ConnectionID == "" {

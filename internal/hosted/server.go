@@ -100,7 +100,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 
 	// Create session.
 	sessionID := s.sessions.Create(req.ConnectionID)
-	SetSessionCookie(w, sessionID, s.sessionSecret)
+	SetSessionCookie(w, sessionID, req.ConnectionID, s.sessionSecret)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "connected"})
 }
@@ -115,7 +115,7 @@ type authStatusResponse struct {
 
 // handleAuthStatus returns the current session state.
 func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
-	sessionID, ok := ReadSessionCookie(r, s.sessionSecret)
+	sessionID, _, ok := ReadSessionCookie(r, s.sessionSecret)
 	if !ok {
 		writeJSON(w, http.StatusOK, authStatusResponse{})
 		return
@@ -155,7 +155,7 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 
 // handleLogout destroys the session.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	sessionID, ok := ReadSessionCookie(r, s.sessionSecret)
+	sessionID, _, ok := ReadSessionCookie(r, s.sessionSecret)
 	if ok {
 		s.sessions.Delete(sessionID)
 	}
@@ -209,7 +209,7 @@ type joinRequest struct {
 // handleJoin adds a new wasteland to the user's metadata.
 // Requires a valid session cookie (manually validated, not through middleware).
 func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
-	sessionID, ok := ReadSessionCookie(r, s.sessionSecret)
+	sessionID, _, ok := ReadSessionCookie(r, s.sessionSecret)
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
 		return
@@ -273,7 +273,7 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 
 // handleLeaveWasteland removes a wasteland from the user's metadata.
 func (s *Server) handleLeaveWasteland(w http.ResponseWriter, r *http.Request) {
-	sessionID, ok := ReadSessionCookie(r, s.sessionSecret)
+	sessionID, _, ok := ReadSessionCookie(r, s.sessionSecret)
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
 		return

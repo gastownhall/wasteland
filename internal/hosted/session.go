@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -58,6 +59,17 @@ func (s *SessionStore) Delete(id string) {
 	delete(s.sessions, id)
 }
 
+// Restore re-creates a session from cookie data after a server restart.
+func (s *SessionStore) Restore(sessionID, connectionID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessions[sessionID] = &UserSession{
+		ID:           sessionID,
+		ConnectionID: connectionID,
+		CreatedAt:    time.Now(),
+	}
+}
+
 func generateSessionID() string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -101,9 +113,39 @@ func VerifySessionID(signed, secret string) (string, bool) {
 	return id, true
 }
 
+// SignSessionCookie signs a session cookie containing both sessionID and connectionID.
+// Format: sessionID.connectionID.HMAC(sessionID.connectionID, secret)
+func SignSessionCookie(sessionID, connectionID, secret string) string {
+	payload := sessionID + "." + connectionID
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	sig := hex.EncodeToString(mac.Sum(nil))
+	return payload + "." + sig
+}
+
+// VerifySessionCookie verifies a signed session cookie in the new 3-segment format.
+// Returns (sessionID, connectionID, ok).
+func VerifySessionCookie(signed, secret string) (string, string, bool) {
+	// Split into exactly 3 segments: sessionID, connectionID, signature.
+	parts := strings.SplitN(signed, ".", 3)
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return "", "", false
+	}
+	sessionID, connectionID, sig := parts[0], parts[1], parts[2]
+
+	payload := sessionID + "." + connectionID
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	expected := hex.EncodeToString(mac.Sum(nil))
+	if !hmac.Equal([]byte(sig), []byte(expected)) {
+		return "", "", false
+	}
+	return sessionID, connectionID, true
+}
+
 // SetSessionCookie sets the wl_session cookie on the response.
-func SetSessionCookie(w http.ResponseWriter, sessionID, secret string) {
-	signed := SignSessionID(sessionID, secret)
+func SetSessionCookie(w http.ResponseWriter, sessionID, connectionID, secret string) {
+	signed := SignSessionCookie(sessionID, connectionID, secret)
 	http.SetCookie(w, &http.Cookie{
 		Name:     cookieName,
 		Value:    signed,
@@ -128,10 +170,23 @@ func ClearSessionCookie(w http.ResponseWriter) {
 }
 
 // ReadSessionCookie reads and verifies the session cookie from the request.
-func ReadSessionCookie(r *http.Request, secret string) (string, bool) {
+// Supports both old format (sessionID.sig → empty connectionID) and new format
+// (sessionID.connectionID.sig).
+func ReadSessionCookie(r *http.Request, secret string) (string, string, bool) {
 	c, err := r.Cookie(cookieName)
 	if err != nil {
-		return "", false
+		return "", "", false
 	}
-	return VerifySessionID(c.Value, secret)
+
+	// Try new 3-segment format first.
+	if sessionID, connectionID, ok := VerifySessionCookie(c.Value, secret); ok {
+		return sessionID, connectionID, true
+	}
+
+	// Fall back to old 2-segment format (connectionID will be empty).
+	if sessionID, ok := VerifySessionID(c.Value, secret); ok {
+		return sessionID, "", true
+	}
+
+	return "", "", false
 }

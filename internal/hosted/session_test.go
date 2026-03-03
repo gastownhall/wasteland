@@ -100,9 +100,10 @@ func TestVerifySessionID_Invalid(t *testing.T) {
 func TestSetAndReadSessionCookie(t *testing.T) {
 	secret := "cookie-secret"
 	sessionID := "sess-42"
+	connectionID := "conn-99"
 
 	w := httptest.NewRecorder()
-	SetSessionCookie(w, sessionID, secret)
+	SetSessionCookie(w, sessionID, connectionID, secret)
 
 	// Extract the cookie from the response and put it in a request.
 	cookies := w.Result().Cookies()
@@ -123,18 +124,21 @@ func TestSetAndReadSessionCookie(t *testing.T) {
 	req := httptest.NewRequest("GET", "/", nil)
 	req.AddCookie(cookie)
 
-	got, ok := ReadSessionCookie(req, secret)
+	gotID, gotConn, ok := ReadSessionCookie(req, secret)
 	if !ok {
 		t.Fatal("expected cookie to be valid")
 	}
-	if got != sessionID {
-		t.Errorf("expected %s, got %s", sessionID, got)
+	if gotID != sessionID {
+		t.Errorf("expected session %s, got %s", sessionID, gotID)
+	}
+	if gotConn != connectionID {
+		t.Errorf("expected connection %s, got %s", connectionID, gotConn)
 	}
 }
 
 func TestReadSessionCookie_Missing(t *testing.T) {
 	req := httptest.NewRequest("GET", "/", nil)
-	_, ok := ReadSessionCookie(req, "secret")
+	_, _, ok := ReadSessionCookie(req, "secret")
 	if ok {
 		t.Error("expected no cookie")
 	}
@@ -155,7 +159,7 @@ func TestClearSessionCookie(t *testing.T) {
 func TestClearSessionCookie_OverwritesExisting(t *testing.T) {
 	secret := "secret"
 	w := httptest.NewRecorder()
-	SetSessionCookie(w, "sess-1", secret)
+	SetSessionCookie(w, "sess-1", "conn-1", secret)
 
 	// Now clear it.
 	w2 := httptest.NewRecorder()
@@ -167,8 +171,97 @@ func TestClearSessionCookie_OverwritesExisting(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: c.Name, Value: c.Value})
 	}
 
-	_, ok := ReadSessionCookie(req, secret)
+	_, _, ok := ReadSessionCookie(req, secret)
 	if ok {
 		t.Error("expected cleared cookie to fail verification")
+	}
+}
+
+func TestSignVerifySessionCookie(t *testing.T) {
+	secret := "test-secret"
+	sessionID := "sess-1"
+	connectionID := "conn-1"
+
+	signed := SignSessionCookie(sessionID, connectionID, secret)
+	gotSess, gotConn, ok := VerifySessionCookie(signed, secret)
+	if !ok {
+		t.Fatal("expected verification to succeed")
+	}
+	if gotSess != sessionID {
+		t.Errorf("expected session %s, got %s", sessionID, gotSess)
+	}
+	if gotConn != connectionID {
+		t.Errorf("expected connection %s, got %s", connectionID, gotConn)
+	}
+}
+
+func TestVerifySessionCookie_WrongSecret(t *testing.T) {
+	signed := SignSessionCookie("sess-1", "conn-1", "secret-1")
+	_, _, ok := VerifySessionCookie(signed, "secret-2")
+	if ok {
+		t.Error("expected verification to fail with wrong secret")
+	}
+}
+
+func TestVerifySessionCookie_Tampered(t *testing.T) {
+	signed := SignSessionCookie("sess-1", "conn-1", "secret")
+	// Tamper with the connectionID segment.
+	tampered := "sess-1.tampered." + signed[len("sess-1.conn-1."):]
+	_, _, ok := VerifySessionCookie(tampered, "secret")
+	if ok {
+		t.Error("expected verification to fail for tampered value")
+	}
+}
+
+func TestVerifySessionCookie_Invalid(t *testing.T) {
+	for _, val := range []string{"", "one-segment", "two.segments", ".empty.first", "a..c", "a.b."} {
+		_, _, ok := VerifySessionCookie(val, "secret")
+		if ok {
+			t.Errorf("expected verification to fail for %q", val)
+		}
+	}
+}
+
+func TestReadSessionCookie_OldFormat(t *testing.T) {
+	// Old-format cookie (sessionID.sig) should still be readable with empty connectionID.
+	secret := "cookie-secret"
+	sessionID := "old-sess"
+	signed := SignSessionID(sessionID, secret)
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: signed})
+
+	gotID, gotConn, ok := ReadSessionCookie(req, secret)
+	if !ok {
+		t.Fatal("expected old-format cookie to be valid")
+	}
+	if gotID != sessionID {
+		t.Errorf("expected session %s, got %s", sessionID, gotID)
+	}
+	if gotConn != "" {
+		t.Errorf("expected empty connectionID, got %s", gotConn)
+	}
+}
+
+func TestSessionStore_Restore(t *testing.T) {
+	store := NewSessionStore()
+
+	// Session should not exist yet.
+	_, ok := store.Get("sess-1")
+	if ok {
+		t.Fatal("expected session to not exist before restore")
+	}
+
+	store.Restore("sess-1", "conn-1")
+
+	sess, ok := store.Get("sess-1")
+	if !ok {
+		t.Fatal("expected session to exist after restore")
+	}
+	if sess.ID != "sess-1" {
+		t.Errorf("expected ID sess-1, got %s", sess.ID)
+	}
+	if sess.ConnectionID != "conn-1" {
+		t.Errorf("expected conn-1, got %s", sess.ConnectionID)
 	}
 }

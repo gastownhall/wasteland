@@ -179,7 +179,7 @@ func TestAuthMiddleware_ValidSession_SingleWasteland(t *testing.T) {
 	req, _ := http.NewRequest("GET", ts.URL+"/api/wanted", nil)
 	req.AddCookie(&http.Cookie{
 		Name:  cookieName,
-		Value: SignSessionID(sessionID, testSecret),
+		Value: SignSessionCookie(sessionID, "conn-1", testSecret),
 	})
 
 	resp, err := http.DefaultClient.Do(req)
@@ -202,7 +202,7 @@ func TestAuthMiddleware_ValidSession_WithHeader(t *testing.T) {
 	req, _ := http.NewRequest("GET", ts.URL+"/api/wanted", nil)
 	req.AddCookie(&http.Cookie{
 		Name:  cookieName,
-		Value: SignSessionID(sessionID, testSecret),
+		Value: SignSessionCookie(sessionID, "conn-1", testSecret),
 	})
 	req.Header.Set("X-Wasteland", "wasteland/wl-commons")
 
@@ -226,7 +226,7 @@ func TestAuthMiddleware_MultiWasteland_NoHeader_Returns400(t *testing.T) {
 	req, _ := http.NewRequest("GET", ts.URL+"/api/wanted", nil)
 	req.AddCookie(&http.Cookie{
 		Name:  cookieName,
-		Value: SignSessionID(sessionID, testSecret),
+		Value: SignSessionCookie(sessionID, "conn-1", testSecret),
 	})
 
 	resp, err := http.DefaultClient.Do(req)
@@ -249,7 +249,7 @@ func TestAuthMiddleware_MultiWasteland_WithHeader(t *testing.T) {
 	req, _ := http.NewRequest("GET", ts.URL+"/api/wanted", nil)
 	req.AddCookie(&http.Cookie{
 		Name:  cookieName,
-		Value: SignSessionID(sessionID, testSecret),
+		Value: SignSessionCookie(sessionID, "conn-1", testSecret),
 	})
 	req.Header.Set("X-Wasteland", "hop/wl-commons")
 
@@ -273,7 +273,7 @@ func TestAuthMiddleware_UnknownUpstream(t *testing.T) {
 	req, _ := http.NewRequest("GET", ts.URL+"/api/wanted", nil)
 	req.AddCookie(&http.Cookie{
 		Name:  cookieName,
-		Value: SignSessionID(sessionID, testSecret),
+		Value: SignSessionCookie(sessionID, "conn-1", testSecret),
 	})
 	req.Header.Set("X-Wasteland", "nonexistent/repo")
 
@@ -312,7 +312,7 @@ func TestAuthMiddleware_ExpiredSession(t *testing.T) {
 func TestAuthMiddleware_NoConnectionID(t *testing.T) {
 	sessions, ts := setupHostedTestServer(t)
 
-	// Create session without connection ID.
+	// Create session without connection ID (old format cookie).
 	sessionID := sessions.Create("")
 
 	req, _ := http.NewRequest("GET", ts.URL+"/api/wanted", nil)
@@ -437,7 +437,7 @@ func TestHandleAuthStatus_Authenticated(t *testing.T) {
 	req, _ := http.NewRequest("GET", ts.URL+"/api/auth/status", nil)
 	req.AddCookie(&http.Cookie{
 		Name:  cookieName,
-		Value: SignSessionID(sessionID, testSecret),
+		Value: SignSessionCookie(sessionID, "conn-1", testSecret),
 	})
 
 	resp, err := http.DefaultClient.Do(req)
@@ -473,7 +473,7 @@ func TestHandleLogout(t *testing.T) {
 	req, _ := http.NewRequest("POST", ts.URL+"/api/auth/logout", nil)
 	req.AddCookie(&http.Cookie{
 		Name:  cookieName,
-		Value: SignSessionID(sessionID, testSecret),
+		Value: SignSessionCookie(sessionID, "conn-1", testSecret),
 	})
 
 	resp, err := http.DefaultClient.Do(req)
@@ -547,7 +547,7 @@ func TestHandleJoinWasteland(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{
 		Name:  cookieName,
-		Value: SignSessionID(sessionID, testSecret),
+		Value: SignSessionCookie(sessionID, "conn-1", testSecret),
 	})
 
 	resp, err := http.DefaultClient.Do(req)
@@ -578,7 +578,7 @@ func TestHandleJoinWasteland_MissingFields(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{
 		Name:  cookieName,
-		Value: SignSessionID(sessionID, testSecret),
+		Value: SignSessionCookie(sessionID, "conn-1", testSecret),
 	})
 
 	resp, err := http.DefaultClient.Do(req)
@@ -653,7 +653,7 @@ func TestHandleLeaveWasteland(t *testing.T) {
 	req, _ := http.NewRequest("DELETE", ts.URL+"/api/auth/wastelands/hop/wl-commons", nil)
 	req.AddCookie(&http.Cookie{
 		Name:  cookieName,
-		Value: SignSessionID(sessionID, testSecret),
+		Value: SignSessionCookie(sessionID, "conn-1", testSecret),
 	})
 
 	resp, err := http.DefaultClient.Do(req)
@@ -677,7 +677,7 @@ func TestHandleLeaveWasteland_CannotRemoveLast(t *testing.T) {
 	req, _ := http.NewRequest("DELETE", ts.URL+"/api/auth/wastelands/wasteland/wl-commons", nil)
 	req.AddCookie(&http.Cookie{
 		Name:  cookieName,
-		Value: SignSessionID(sessionID, testSecret),
+		Value: SignSessionCookie(sessionID, "conn-1", testSecret),
 	})
 
 	resp, err := http.DefaultClient.Do(req)
@@ -689,5 +689,103 @@ func TestHandleLeaveWasteland_CannotRemoveLast(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		body, _ := io.ReadAll(resp.Body)
 		t.Errorf("expected 400 for last wasteland, got %d: %s", resp.StatusCode, string(body))
+	}
+}
+
+func TestAuthMiddleware_RehydrateAfterRestart(t *testing.T) {
+	sessions, ts := setupHostedTestServer(t)
+
+	// Create session, get the cookie, then delete from store (simulating restart).
+	sessionID := sessions.Create("conn-1")
+	signed := SignSessionCookie(sessionID, "conn-1", testSecret)
+	sessions.Delete(sessionID)
+
+	// Verify session is gone from store.
+	if _, ok := sessions.Get(sessionID); ok {
+		t.Fatal("expected session to be deleted")
+	}
+
+	// Request with valid cookie should succeed via Nango re-hydration.
+	req, _ := http.NewRequest("GET", ts.URL+"/api/wanted", nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: signed})
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck // test cleanup
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Errorf("expected 200 after re-hydration, got %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Session should now be restored in the store.
+	sess, ok := sessions.Get(sessionID)
+	if !ok {
+		t.Fatal("expected session to be restored in store")
+	}
+	if sess.ConnectionID != "conn-1" {
+		t.Errorf("expected conn-1, got %s", sess.ConnectionID)
+	}
+}
+
+func TestAuthMiddleware_RehydrateFails_InvalidConnection(t *testing.T) {
+	// Set up a Nango server that returns 404 for unknown connections.
+	nangoTS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	t.Cleanup(nangoTS.Close)
+
+	nango := NewNangoClient(NangoConfig{
+		BaseURL:       nangoTS.URL,
+		SecretKey:     "nango-secret",
+		IntegrationID: "dolthub",
+	})
+	sessions := NewSessionStore()
+	resolver := NewWorkspaceResolver(nango, sessions)
+	server := NewServer(resolver, sessions, nango, testSecret)
+
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	mux := http.NewServeMux()
+	mux.Handle("/", server.AuthMiddleware(inner))
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+
+	// Cookie with connectionID that Nango rejects.
+	signed := SignSessionCookie("sess-revoked", "conn-revoked", testSecret)
+	req, _ := http.NewRequest("GET", ts.URL+"/api/wanted", nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: signed})
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck // test cleanup
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 for revoked connection, got %d", resp.StatusCode)
+	}
+}
+
+func TestAuthMiddleware_OldFormatCookie_NoRehydration(t *testing.T) {
+	_, ts := setupHostedTestServer(t)
+
+	// Old-format cookie (no connectionID) for a session not in store → 401.
+	signed := SignSessionID("old-sess", testSecret)
+	req, _ := http.NewRequest("GET", ts.URL+"/api/wanted", nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: signed})
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck // test cleanup
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 for old-format cookie, got %d", resp.StatusCode)
 	}
 }
