@@ -266,14 +266,13 @@ Parse upstream into org and db name (split on `/`).
 Fork the upstream commons to the user's DoltHub org via the DoltHub API:
 
 ```bash
-curl -s -X POST "https://www.dolthub.com/api/v1alpha1/database/fork" \
+curl -s -X POST "https://www.dolthub.com/api/v1alpha1/fork" \
   -H "Content-Type: application/json" \
   -H "authorization: token $DOLTHUB_TOKEN" \
   -d '{
-    "owner_name": "USER_DOLTHUB_ORG",
-    "new_repo_name": "UPSTREAM_DB",
-    "from_owner": "UPSTREAM_ORG",
-    "from_repo_name": "UPSTREAM_DB"
+    "ownerName": "USER_DOLTHUB_ORG",
+    "parentOwnerName": "UPSTREAM_ORG",
+    "parentDatabaseName": "UPSTREAM_DB"
   }'
 ```
 
