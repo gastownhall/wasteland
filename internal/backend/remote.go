@@ -434,7 +434,9 @@ func (r *RemoteDB) doGet(apiURL string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("authorization", "token "+r.token)
+	if r.token != "" {
+		req.Header.Set("authorization", "token "+r.token)
+	}
 
 	resp, err := r.client.Do(req)
 	if err != nil {
@@ -463,7 +465,9 @@ func (r *RemoteDB) doPost(apiURL string, payload []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("authorization", "token "+r.token)
+	if r.token != "" {
+		req.Header.Set("authorization", "token "+r.token)
+	}
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
