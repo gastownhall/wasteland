@@ -250,10 +250,12 @@ func runServeHosted(cmd *cobra.Command, stdout, _ io.Writer) error {
 	defer hostedDumpCache.Stop()
 
 	// Anonymous client for unauthenticated public reads (browse, detail, etc.).
-	// Uses a tokenless DoltHub provider — the API is public for public repos.
+	// Uses a background-refreshing cache so no user request blocks on DoltHub.
+	pendingCache := newPendingItemsCache("hop", "wl-commons", 2*time.Minute)
+	defer pendingCache.Stop()
 	anonClient := sdk.New(sdk.ClientConfig{
 		DB:               publicDB,
-		ListPendingItems: publicListPendingItems("hop", "wl-commons"),
+		ListPendingItems: pendingCache.Get,
 	})
 	apiServer.SetPublicClient(anonClient)
 
@@ -298,28 +300,23 @@ func newDumpRefresh(db commons.DB) func() ([]byte, error) {
 	}
 }
 
-// publicListPendingItems returns a ListPendingItems callback that queries the
-// DoltHub API without a token. The DoltHub REST and SQL APIs are public for
-// public repos, so this works for the logged-out experience.
-func publicListPendingItems(upstreamOrg, db string) func() (map[string][]sdk.PendingItem, error) {
+// pendingItemsCache refreshes pending PR data in the background so user
+// requests never block on DoltHub API calls.
+type pendingItemsCache struct {
+	mu     sync.RWMutex
+	cached map[string][]sdk.PendingItem
+	stop   chan struct{}
+}
+
+func newPendingItemsCache(upstreamOrg, db string, interval time.Duration) *pendingItemsCache {
+	c := &pendingItemsCache{stop: make(chan struct{})}
 	provider := remote.NewDoltHubProvider("")
 
-	var (
-		mu       sync.Mutex
-		cached   map[string][]sdk.PendingItem
-		cachedAt time.Time
-		cacheTTL = 2 * time.Minute // longer TTL for public/anonymous requests
-	)
-
-	return func() (map[string][]sdk.PendingItem, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		if cached != nil && time.Since(cachedAt) < cacheTTL {
-			return cached, nil
-		}
+	refresh := func() {
 		states, err := provider.ListPendingWantedIDs(upstreamOrg, db)
 		if err != nil {
-			return nil, err
+			slog.Warn("pending items refresh failed", "error", err)
+			return
 		}
 		result := make(map[string][]sdk.PendingItem, len(states))
 		for id, pending := range states {
@@ -336,8 +333,37 @@ func publicListPendingItems(upstreamOrg, db string) func() (map[string][]sdk.Pen
 			}
 			result[id] = items
 		}
-		cached = result
-		cachedAt = time.Now()
-		return cached, nil
+		c.mu.Lock()
+		c.cached = result
+		c.mu.Unlock()
 	}
+
+	// Pre-warm on startup.
+	go refresh()
+
+	// Background refresh loop.
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				refresh()
+			case <-c.stop:
+				return
+			}
+		}
+	}()
+
+	return c
+}
+
+func (c *pendingItemsCache) Get() (map[string][]sdk.PendingItem, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.cached, nil
+}
+
+func (c *pendingItemsCache) Stop() {
+	close(c.stop)
 }
