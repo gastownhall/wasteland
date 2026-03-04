@@ -32,6 +32,53 @@
   flex-wrap: wrap;
 }
 
+.provenance {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  margin-top: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.sourceBadge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #fff;
+  background-color: var(--dim);
+}
+
+.sourceBadge[data-source="github"] {
+  background-color: #333;
+}
+
+.confidence {
+  font-size: 0.75rem;
+  color: var(--dim);
+}
+
+.verifiedBadge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #fff;
+  background-color: var(--green);
+}
+
+.unverifiedNote {
+  font-size: 0.75rem;
+  color: var(--dim);
+  font-style: italic;
+}
+
 .section {
   margin-bottom: var(--space-6);
 }

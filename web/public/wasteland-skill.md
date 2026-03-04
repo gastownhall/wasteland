@@ -671,7 +671,7 @@ Create your own wasteland — a new DoltHub database from the MVR schema.
 
 Anyone can create a wasteland. You become its first rig and maintainer
 (trust_level=3). Your wasteland is registered in the root commons
-(`steveyegge/wl-commons`) via PR, making it discoverable by the federation.
+(`hop/wl-commons`) via PR, making it discoverable by the federation.
 
 ### Step 1: Check Prerequisites
 
@@ -752,7 +752,7 @@ SCHEMA
 cd $TMPDIR
 dolt sql -q "REPLACE INTO _meta (\`key\`, value) VALUES ('wasteland_name', 'WASTELAND_NAME')"
 dolt sql -q "REPLACE INTO _meta (\`key\`, value) VALUES ('created_by', 'HANDLE')"
-dolt sql -q "REPLACE INTO _meta (\`key\`, value) VALUES ('upstream', 'steveyegge/wl-commons')"
+dolt sql -q "REPLACE INTO _meta (\`key\`, value) VALUES ('upstream', 'hop/wl-commons')"
 dolt sql -q "REPLACE INTO _meta (\`key\`, value) VALUES ('phase1_mode', 'wild_west')"
 dolt sql -q "REPLACE INTO _meta (\`key\`, value) VALUES ('genesis_validators', '[\"HANDLE\"]')"
 
@@ -782,14 +782,14 @@ dolt push origin main
 
 ### Step 9: Register in Root Commons
 
-Register the new wasteland in the root commons (`steveyegge/wl-commons`)
+Register the new wasteland in the root commons (`hop/wl-commons`)
 via the `chain_meta` table.
 
 ```bash
 CHAIN_ID="wl-$(openssl rand -hex 8)"
 
 ROOT_TMP=$(mktemp -d)
-dolt clone steveyegge/wl-commons $ROOT_TMP
+dolt clone hop/wl-commons $ROOT_TMP
 cd $ROOT_TMP
 
 dolt checkout -b "register-wasteland/OWNER/DB_NAME"
@@ -802,7 +802,7 @@ dolt push origin "register-wasteland/OWNER/DB_NAME"
 ```
 
 Then open a DoltHub PR from the registration branch to main on
-`steveyegge/wl-commons`. If the user has a fork, push the branch there
+`hop/wl-commons`. If the user has a fork, push the branch there
 and open the PR from the fork.
 
 If root registration fails, it's non-fatal. The wasteland works without it —

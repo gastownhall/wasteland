@@ -54,10 +54,24 @@ export function ProfileView() {
         {data.bio && <p className={styles.bio}>{data.bio}</p>}
         <div className={styles.meta}>
           {data.location && <span>{data.location}</span>}
-          <span>Source: {data.source}</span>
-          <span>Confidence: {(data.confidence * 100).toFixed(0)}%</span>
           {data.followers != null && data.followers > 0 && <span>{data.followers.toLocaleString()} followers</span>}
           {data.account_age != null && data.account_age > 0 && <span>{data.account_age.toFixed(1)} years</span>}
+        </div>
+        <div className={styles.provenance}>
+          <span className={styles.sourceBadge} data-source={data.source}>
+            {data.source === "github" ? "GitHub profile" : data.source}
+          </span>
+          <span className={styles.confidence} title="How confident the system is in this profile data">
+            {(data.confidence * 100).toFixed(0)}% confidence
+          </span>
+          {data.stamp_count > 0 && (
+            <span className={styles.verifiedBadge}>
+              {data.stamp_count} {data.stamp_count === 1 ? "stamp" : "stamps"} earned
+            </span>
+          )}
+          {data.stamp_count === 0 && (
+            <span className={styles.unverifiedNote}>No Wasteland stamps yet</span>
+          )}
         </div>
       </div>
 
@@ -99,7 +113,6 @@ export function ProfileView() {
       )}
 
       <footer className={styles.footer}>
-        <span>Stamps: {data.stamp_count}</span>
         {data.total_stars != null && <span>Total stars: {data.total_stars.toLocaleString()}</span>}
         {data.total_repos != null && <span>Repos: {data.total_repos}</span>}
       </footer>
