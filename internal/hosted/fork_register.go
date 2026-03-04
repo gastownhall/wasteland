@@ -45,21 +45,21 @@ func (d *DoltHubForkRegistrar) EnsureForkAndRegister(apiKey, upstream, forkOrg, 
 	db := backend.NewRemoteDB(apiKey, upstreamOrg, upstreamDB, forkOrg, upstreamDB, federation.ModePR)
 	branch := fmt.Sprintf("wl/register/%s", rigHandle)
 	regSQL := commons.BuildRegistrationSQL(rigHandle, forkOrg, displayName, email, "hosted")
-	// Retry with backoff — newly created forks may take a moment to become
-	// available on the DoltHub SQL write API.
+	// Retry with backoff — newly created forks may not be immediately available
+	// on the DoltHub SQL write API due to propagation delay.
 	var execErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; attempt < 5; attempt++ {
 		if attempt > 0 {
-			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+			time.Sleep(time.Duration(attempt) * 3 * time.Second)
 		}
 		execErr = db.Exec(branch, "", false, regSQL)
 		if execErr == nil {
 			break
 		}
 		if !strings.Contains(execErr.Error(), "no such repository") {
-			break // non-retryable error
+			break
 		}
-		slog.Info("fork registrar: fork not yet available, retrying", "attempt", attempt+1, "error", execErr)
+		slog.Info("fork registrar: fork not yet available, retrying", "attempt", attempt+1)
 	}
 	if execErr != nil {
 		return fmt.Sprintf("rig registration failed: %v", execErr)
