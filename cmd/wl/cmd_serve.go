@@ -308,7 +308,7 @@ func publicListPendingItems(upstreamOrg, db string) func() (map[string][]sdk.Pen
 		mu       sync.Mutex
 		cached   map[string][]sdk.PendingItem
 		cachedAt time.Time
-		cacheTTL = 30 * time.Second
+		cacheTTL = 2 * time.Minute // longer TTL for public/anonymous requests
 	)
 
 	return func() (map[string][]sdk.PendingItem, error) {

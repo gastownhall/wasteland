@@ -548,7 +548,7 @@ func (d *DoltHubProvider) ListPendingWantedIDs(upstreamOrg, db string) (map[stri
 		return nil, fmt.Errorf("listing PRs: %w", err)
 	}
 
-	// Collect PR details (sequential — existing behavior).
+	// Collect PR details in parallel.
 	type prInfo struct {
 		pullID          string
 		fromBranch      string
@@ -556,43 +556,73 @@ func (d *DoltHubProvider) ListPendingWantedIDs(upstreamOrg, db string) (map[stri
 		rigHandle       string
 		wantedID        string
 	}
-	var prs []prInfo
+
+	// Filter open PRs first.
+	var openPulls []pullSummary
 	for _, pr := range pulls {
-		if !strings.EqualFold(pr.State, "open") {
-			continue
+		if strings.EqualFold(pr.State, "open") {
+			openPulls = append(openPulls, pr)
 		}
-		detailURL := fmt.Sprintf("%s/%s/%s/pulls/%s", dolthubAPIBase, upstreamOrg, db, pr.PullID)
-		detail, err := d.dolthubGet(detailURL)
-		if err != nil {
-			continue
+	}
+
+	// Fetch PR details in parallel.
+	type detailResult struct {
+		info prInfo
+		ok   bool
+	}
+	detailCh := make(chan detailResult, len(openPulls))
+	var detailWG sync.WaitGroup
+
+	for _, pr := range openPulls {
+		detailWG.Add(1)
+		go func(pullID string) {
+			defer detailWG.Done()
+			detailURL := fmt.Sprintf("%s/%s/%s/pulls/%s", dolthubAPIBase, upstreamOrg, db, pullID)
+			detail, err := d.dolthubGet(detailURL)
+			if err != nil {
+				return
+			}
+			var prDetail struct {
+				FromBranch      string `json:"from_branch"`
+				FromBranchOwner string `json:"from_branch_owner"`
+			}
+			if err := json.Unmarshal(detail, &prDetail); err != nil {
+				return
+			}
+			if !strings.HasPrefix(prDetail.FromBranch, "wl/") {
+				return
+			}
+			rest := strings.TrimPrefix(prDetail.FromBranch, "wl/")
+			slashIdx := strings.Index(rest, "/")
+			if slashIdx < 0 {
+				return
+			}
+			rigHandle := rest[:slashIdx]
+			wantedID := rest[slashIdx+1:]
+			if wantedID == "" {
+				return
+			}
+			detailCh <- detailResult{
+				info: prInfo{
+					pullID:          pullID,
+					fromBranch:      prDetail.FromBranch,
+					fromBranchOwner: prDetail.FromBranchOwner,
+					rigHandle:       rigHandle,
+					wantedID:        wantedID,
+				},
+				ok: true,
+			}
+		}(pr.PullID)
+	}
+
+	detailWG.Wait()
+	close(detailCh)
+
+	var prs []prInfo
+	for r := range detailCh {
+		if r.ok {
+			prs = append(prs, r.info)
 		}
-		var prDetail struct {
-			FromBranch      string `json:"from_branch"`
-			FromBranchOwner string `json:"from_branch_owner"`
-		}
-		if err := json.Unmarshal(detail, &prDetail); err != nil {
-			continue
-		}
-		if !strings.HasPrefix(prDetail.FromBranch, "wl/") {
-			continue
-		}
-		rest := strings.TrimPrefix(prDetail.FromBranch, "wl/")
-		slashIdx := strings.Index(rest, "/")
-		if slashIdx < 0 {
-			continue
-		}
-		rigHandle := rest[:slashIdx]
-		wantedID := rest[slashIdx+1:]
-		if wantedID == "" {
-			continue
-		}
-		prs = append(prs, prInfo{
-			pullID:          pr.PullID,
-			fromBranch:      prDetail.FromBranch,
-			fromBranchOwner: prDetail.FromBranchOwner,
-			rigHandle:       rigHandle,
-			wantedID:        wantedID,
-		})
 	}
 
 	// Query fork branches in parallel for real item state.
