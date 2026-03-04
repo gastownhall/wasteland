@@ -45,6 +45,20 @@ export function BrowseList() {
     load();
   }, [load]);
 
+  // Silent background poll — no loading spinner, no error toasts.
+  useEffect(() => {
+    if (!hasLoadedRef.current) return;
+    const id = setInterval(() => {
+      if (document.hidden) return;
+      browse(filter)
+        .then((resp) => {
+          setItems(resp.items);
+        })
+        .catch(() => {});
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [filter]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;

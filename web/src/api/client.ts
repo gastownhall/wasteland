@@ -255,4 +255,8 @@ export async function profileSearch(q: string): Promise<ProfileSummary[]> {
   return request<ProfileSummary[]>(`/api/profile?q=${encodeURIComponent(q)}`);
 }
 
+export function isConflictError(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 409;
+}
+
 export { ApiError };

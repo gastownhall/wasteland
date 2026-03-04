@@ -6,6 +6,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/julianknutsen/wasteland/internal/pile"
 	"github.com/julianknutsen/wasteland/internal/sdk"
@@ -27,6 +28,8 @@ type Server struct {
 	scoreboardDetail *CachedEndpoint
 	scoreboardDump   *CachedEndpoint
 	publicClient     *sdk.Client // anonymous fallback for public reads (hosted mode)
+	browseCache      *ReadCache  // keyed by canonicalized query string
+	detailCache      *ReadCache  // keyed by item ID
 	mux              *http.ServeMux
 	hosted           bool // true when running in multi-tenant hosted mode
 }
@@ -42,9 +45,11 @@ func New(client *sdk.Client) *Server {
 // NewHosted creates a Server for multi-tenant hosted mode.
 func NewHosted(fn ClientFunc) *Server {
 	s := &Server{
-		clientFunc: fn,
-		mux:        http.NewServeMux(),
-		hosted:     true,
+		clientFunc:  fn,
+		browseCache: NewReadCache(30*time.Second, 64),
+		detailCache: NewReadCache(30*time.Second, 256),
+		mux:         http.NewServeMux(),
+		hosted:      true,
 	}
 	s.pile = pile.NewDefault()
 	s.registerRoutes()
@@ -56,6 +61,8 @@ func NewHostedWorkspace(clientFn ClientFunc, workspaceFn WorkspaceFunc) *Server 
 	s := &Server{
 		clientFunc:    clientFn,
 		workspaceFunc: workspaceFn,
+		browseCache:   NewReadCache(30*time.Second, 64),
+		detailCache:   NewReadCache(30*time.Second, 256),
 		mux:           http.NewServeMux(),
 		hosted:        true,
 	}
@@ -67,8 +74,10 @@ func NewHostedWorkspace(clientFn ClientFunc, workspaceFn WorkspaceFunc) *Server 
 // NewWithClientFunc creates a Server that resolves a client per-request.
 func NewWithClientFunc(fn ClientFunc) *Server {
 	s := &Server{
-		clientFunc: fn,
-		mux:        http.NewServeMux(),
+		clientFunc:  fn,
+		browseCache: NewReadCache(30*time.Second, 64),
+		detailCache: NewReadCache(30*time.Second, 256),
+		mux:         http.NewServeMux(),
 	}
 	s.pile = pile.NewDefault()
 	s.registerRoutes()

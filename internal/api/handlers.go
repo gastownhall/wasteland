@@ -1,7 +1,10 @@
 package api
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http"
+	"net/url"
 
 	"github.com/julianknutsen/wasteland/internal/commons"
 	"github.com/julianknutsen/wasteland/internal/sdk"
@@ -29,13 +32,23 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	filter := parseQueryFilter(r)
-	result, err := client.Browse(filter)
+	key := canonicalBrowseKey(r)
+	data, err := s.browseCache.GetOrFetch(key, func() ([]byte, error) {
+		filter := parseQueryFilter(r)
+		result, err := client.Browse(filter)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(toBrowseResponse(result))
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, toBrowseResponse(result))
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=15, stale-while-revalidate=30")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }
 
 func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
@@ -44,12 +57,21 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	result, err := client.Detail(id)
+	data, err := s.detailCache.GetOrFetch(id, func() ([]byte, error) {
+		result, err := client.Detail(id)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(toDetailResponse(result, client.Mode()))
+	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, toDetailResponse(result, client.Mode()))
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=15, stale-while-revalidate=30")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
@@ -116,6 +138,41 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// canonicalBrowseKey produces a stable cache key from the known browse filter
+// query params. url.Values.Encode() sorts keys alphabetically.
+func canonicalBrowseKey(r *http.Request) string {
+	q := r.URL.Query()
+	canon := url.Values{}
+	for _, k := range []string{"status", "type", "priority", "project", "search", "sort", "limit", "view", "long"} {
+		if v := q.Get(k); v != "" {
+			canon.Set(k, v)
+		}
+	}
+	return canon.Encode()
+}
+
+// invalidateReadCaches busts browse and detail caches after a mutation.
+func (s *Server) invalidateReadCaches(itemID string) {
+	s.browseCache.Invalidate()
+	s.detailCache.InvalidateKey(itemID)
+}
+
+// invalidateAllCaches busts both browse and detail caches entirely.
+func (s *Server) invalidateAllCaches() {
+	s.browseCache.Invalidate()
+	s.detailCache.Invalidate()
+}
+
+// writeMutationError writes a 409 for ConflictError, 400 for everything else.
+func writeMutationError(w http.ResponseWriter, err error) {
+	var conflict *commons.ConflictError
+	if errors.As(err, &conflict) {
+		writeError(w, http.StatusConflict, conflict.Message)
+		return
+	}
+	writeError(w, http.StatusBadRequest, err.Error())
+}
+
 // --- Mutation handlers ---
 
 func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
@@ -142,9 +199,10 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		Tags:        req.Tags,
 	})
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeMutationError(w, err)
 		return
 	}
+	s.browseCache.Invalidate()
 	writeJSON(w, http.StatusCreated, toMutationResponse(result, client.Mode()))
 }
 
@@ -174,9 +232,10 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := client.Update(id, fields)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeMutationError(w, err)
 		return
 	}
+	s.invalidateReadCaches(id)
 	writeJSON(w, http.StatusOK, toMutationResponse(result, client.Mode()))
 }
 
@@ -188,9 +247,10 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	result, err := client.Delete(id)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeMutationError(w, err)
 		return
 	}
+	s.invalidateReadCaches(id)
 	writeJSON(w, http.StatusOK, toMutationResponse(result, client.Mode()))
 }
 
@@ -202,9 +262,10 @@ func (s *Server) handleClaim(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	result, err := client.Claim(id)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeMutationError(w, err)
 		return
 	}
+	s.invalidateReadCaches(id)
 	writeJSON(w, http.StatusOK, toMutationResponse(result, client.Mode()))
 }
 
@@ -216,9 +277,10 @@ func (s *Server) handleUnclaim(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	result, err := client.Unclaim(id)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeMutationError(w, err)
 		return
 	}
+	s.invalidateReadCaches(id)
 	writeJSON(w, http.StatusOK, toMutationResponse(result, client.Mode()))
 }
 
@@ -239,9 +301,10 @@ func (s *Server) handleDone(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := client.Done(id, req.Evidence)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeMutationError(w, err)
 		return
 	}
+	s.invalidateReadCaches(id)
 	writeJSON(w, http.StatusOK, toMutationResponse(result, client.Mode()))
 }
 
@@ -264,9 +327,10 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 		Message:     req.Message,
 	})
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeMutationError(w, err)
 		return
 	}
+	s.invalidateReadCaches(id)
 	writeJSON(w, http.StatusOK, toMutationResponse(result, client.Mode()))
 }
 
@@ -283,9 +347,10 @@ func (s *Server) handleReject(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := client.Reject(id, req.Reason)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeMutationError(w, err)
 		return
 	}
+	s.invalidateReadCaches(id)
 	writeJSON(w, http.StatusOK, toMutationResponse(result, client.Mode()))
 }
 
@@ -297,9 +362,10 @@ func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	result, err := client.Close(id)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeMutationError(w, err)
 		return
 	}
+	s.invalidateReadCaches(id)
 	writeJSON(w, http.StatusOK, toMutationResponse(result, client.Mode()))
 }
 
@@ -315,6 +381,7 @@ func (s *Server) handleApplyBranch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	s.invalidateAllCaches()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "applied"})
 }
 
@@ -391,5 +458,6 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.invalidateAllCaches()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "synced"})
 }

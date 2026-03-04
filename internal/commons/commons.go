@@ -208,6 +208,12 @@ type WantedUpdate struct {
 	TagsSet     bool // true if Tags was explicitly provided (even if empty)
 }
 
+// ConflictError indicates an optimistic concurrency conflict (e.g. item was
+// already claimed or changed by another user). Mapped to HTTP 409 by the API.
+type ConflictError struct{ Message string }
+
+func (e *ConflictError) Error() string { return e.Message }
+
 // isNothingToCommit returns true if the error indicates DOLT_COMMIT found no
 // changes to commit.
 func isNothingToCommit(err error) bool {
@@ -324,7 +330,7 @@ func ClaimWanted(db DB, wantedID, rigHandle string, signed bool) error {
 		return nil
 	}
 	if isNothingToCommit(err) {
-		return fmt.Errorf("wanted item %q is not open or does not exist", wantedID)
+		return &ConflictError{Message: fmt.Sprintf("wanted item %q is not open or does not exist", wantedID)}
 	}
 	return fmt.Errorf("claim failed: %w", err)
 }
@@ -342,7 +348,7 @@ func UnclaimWanted(db DB, wantedID string, signed bool) error {
 		return nil
 	}
 	if isNothingToCommit(err) {
-		return fmt.Errorf("wanted item %q is not claimed or does not exist", wantedID)
+		return &ConflictError{Message: fmt.Sprintf("wanted item %q is not claimed or does not exist", wantedID)}
 	}
 	return fmt.Errorf("unclaim failed: %w", err)
 }
@@ -373,7 +379,7 @@ func SubmitCompletion(db DB, completionID, wantedID, rigHandle, evidence, hopURI
 		return nil
 	}
 	if isNothingToCommit(err) {
-		return fmt.Errorf("wanted item %q is not claimed by %q or does not exist", wantedID, rigHandle)
+		return &ConflictError{Message: fmt.Sprintf("wanted item %q is not claimed by %q or does not exist", wantedID, rigHandle)}
 	}
 	return fmt.Errorf("completion failed: %w", err)
 }
@@ -646,7 +652,7 @@ func AcceptCompletion(db DB, wantedID, completionID, rigHandle, hopURI string, s
 		return nil
 	}
 	if isNothingToCommit(err) {
-		return fmt.Errorf("wanted item %q is not in_review or does not exist", wantedID)
+		return &ConflictError{Message: fmt.Sprintf("wanted item %q is not in_review or does not exist", wantedID)}
 	}
 	return fmt.Errorf("accept failed: %w", err)
 }
@@ -699,7 +705,7 @@ func UpdateWanted(db DB, wantedID string, fields *WantedUpdate, signed bool) err
 		return nil
 	}
 	if isNothingToCommit(err) {
-		return fmt.Errorf("wanted item %q is not open or does not exist", wantedID)
+		return &ConflictError{Message: fmt.Sprintf("wanted item %q is not open or does not exist", wantedID)}
 	}
 	return fmt.Errorf("update failed: %w", err)
 }
@@ -717,7 +723,7 @@ func CloseWanted(db DB, wantedID string, signed bool) error {
 		return nil
 	}
 	if isNothingToCommit(err) {
-		return fmt.Errorf("wanted item %q is not in_review or does not exist", wantedID)
+		return &ConflictError{Message: fmt.Sprintf("wanted item %q is not in_review or does not exist", wantedID)}
 	}
 	return fmt.Errorf("close failed: %w", err)
 }
@@ -750,7 +756,7 @@ func DeleteWanted(db DB, wantedID string, signed bool) error {
 		return nil
 	}
 	if isNothingToCommit(err) {
-		return fmt.Errorf("wanted item %q is not open or does not exist", wantedID)
+		return &ConflictError{Message: fmt.Sprintf("wanted item %q is not open or does not exist", wantedID)}
 	}
 	return fmt.Errorf("delete failed: %w", err)
 }
@@ -776,7 +782,7 @@ func RejectCompletion(db DB, wantedID, _, reason string, signed bool) error {
 		return nil
 	}
 	if isNothingToCommit(err) {
-		return fmt.Errorf("wanted item %q is not in_review or does not exist", wantedID)
+		return &ConflictError{Message: fmt.Sprintf("wanted item %q is not in_review or does not exist", wantedID)}
 	}
 	return fmt.Errorf("reject failed: %w", err)
 }

@@ -12,6 +12,7 @@ import {
   detail,
   discardBranch,
   done,
+  isConflictError,
   reject,
   submitPR,
   unclaim,
@@ -137,6 +138,11 @@ export function DetailView() {
         await load();
       }
     } catch (e) {
+      if (isConflictError(e)) {
+        toast.error("This item was already claimed or changed by someone else");
+        await load();
+        return;
+      }
       const msg = e instanceof Error ? e.message : `Failed to ${action}`;
       toast.error(msg);
     }
@@ -156,6 +162,11 @@ export function DetailView() {
         await load();
       }
     } catch (e) {
+      if (isConflictError(e)) {
+        toast.error("This item was already claimed or changed by someone else");
+        await load();
+        return;
+      }
       toast.error(e instanceof Error ? e.message : "Failed to submit");
     } finally {
       setDoneSubmitting(false);
