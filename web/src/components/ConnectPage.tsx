@@ -214,7 +214,9 @@ export function ConnectPage() {
                   className={styles.link}
                 >
                   dolthub.com/settings/tokens
-                </a>
+                </a>{" "}
+                with <strong>database</strong>, <strong>pull request</strong>, <strong>SQL</strong>, and{" "}
+                <strong>branch</strong> permissions
               </li>
             </ol>
           </div>
@@ -257,7 +259,8 @@ export function ConnectPage() {
                 >
                   dolthub.com/settings/tokens
                 </a>
-                . Your token is stored securely and never written to disk.
+                . Requires database, pull request, SQL, and branch permissions. Your token is stored securely and never
+                written to disk.
               </span>
             </label>
           </div>
