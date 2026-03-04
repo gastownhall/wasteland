@@ -217,3 +217,21 @@ export interface ProfileSummary {
   handle: string;
   display_name: string;
 }
+
+export interface ScoreboardEntry {
+  rig_handle: string;
+  display_name?: string;
+  trust_tier: string;
+  stamp_count: number;
+  weighted_score: number;
+  unique_towns: number;
+  completions: number;
+  avg_quality: number;
+  avg_reliability: number;
+  top_skills?: string[];
+}
+
+export interface ScoreboardResponse {
+  entries: ScoreboardEntry[];
+  updated_at: string;
+}

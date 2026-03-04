@@ -31,6 +31,8 @@ func WorkspaceFromContext(ctx context.Context) (*sdk.Workspace, bool) {
 // AuthMiddleware protects /api/* routes (excluding /api/auth/*).
 // It resolves the session cookie, looks up the Nango connection, and injects
 // the per-user sdk.Workspace and active sdk.Client into the request context.
+// GET requests are allowed through without auth (public reads) — the handler
+// falls back to an anonymous public client when no auth context is present.
 func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 	isValidUpstream := func(s string) bool {
 		org, db, ok := strings.Cut(s, "/")
@@ -39,6 +41,16 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 		}
 		// db must not contain slashes, and neither part should have whitespace.
 		return !strings.ContainsAny(org, " \t\n\r") && !strings.ContainsAny(db, " \t\n\r/")
+	}
+
+	// passOrBlock lets GET requests through without auth (anonymous public
+	// reads); non-GET requests get a hard error.
+	passOrBlock := func(w http.ResponseWriter, r *http.Request, status int, msg string) {
+		if r.Method == http.MethodGet {
+			next.ServeHTTP(w, r)
+			return
+		}
+		writeJSON(w, status, map[string]string{"error": msg})
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -57,8 +69,7 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 		// Read and verify session cookie.
 		sessionID, connectionID, ok := ReadSessionCookie(r, s.sessionSecret)
 		if !ok {
-			slog.Warn("auth: invalid session cookie", "path", r.URL.Path)
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+			passOrBlock(w, r, http.StatusUnauthorized, "not authenticated")
 			return
 		}
 
@@ -68,13 +79,13 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 			if connectionID == "" {
 				// Old-format cookie without connectionID — can't re-hydrate.
 				slog.Warn("auth: session expired (no connection_id)", "path", r.URL.Path)
-				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "session expired"})
+				passOrBlock(w, r, http.StatusUnauthorized, "session expired")
 				return
 			}
 			// Validate the connection is still active in Nango.
 			if _, _, err := s.nango.GetConnection(connectionID); err != nil {
 				slog.Warn("auth: session expired (nango validation failed)", "error", err, "path", r.URL.Path)
-				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "session expired"})
+				passOrBlock(w, r, http.StatusUnauthorized, "session expired")
 				return
 			}
 			s.sessions.Restore(sessionID, connectionID)
@@ -82,7 +93,7 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 		}
 
 		if session.ConnectionID == "" {
-			writeJSON(w, http.StatusPreconditionFailed, map[string]string{"error": "DoltHub not connected"})
+			passOrBlock(w, r, http.StatusPreconditionFailed, "DoltHub not connected")
 			return
 		}
 
@@ -90,7 +101,7 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 		workspace, err := s.resolver.Resolve(session)
 		if err != nil {
 			slog.Warn("auth: failed to resolve workspace", "error", err, "path", r.URL.Path)
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "failed to resolve workspace: " + err.Error()})
+			passOrBlock(w, r, http.StatusUnauthorized, "failed to resolve workspace: "+err.Error())
 			return
 		}
 
@@ -104,19 +115,19 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 		}
 
 		if upstream == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "X-Wasteland header required"})
+			passOrBlock(w, r, http.StatusBadRequest, "X-Wasteland header required")
 			return
 		}
 
 		// Validate format: must be "org/db".
 		if !isValidUpstream(upstream) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid X-Wasteland format, expected org/db"})
+			passOrBlock(w, r, http.StatusBadRequest, "invalid X-Wasteland format, expected org/db")
 			return
 		}
 
 		client, err := workspace.Client(upstream)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown upstream: " + upstream})
+			passOrBlock(w, r, http.StatusBadRequest, "unknown upstream: "+upstream)
 			return
 		}
 

@@ -159,7 +159,9 @@ func setupMultiWastelandTestServer(t *testing.T) (*SessionStore, *httptest.Serve
 func TestAuthMiddleware_NoSession(t *testing.T) {
 	_, ts := setupHostedTestServer(t)
 
-	resp, err := http.Get(ts.URL + "/api/wanted")
+	// Mutations without session get 401.
+	req, _ := http.NewRequest("POST", ts.URL+"/api/wanted", nil)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,6 +169,23 @@ func TestAuthMiddleware_NoSession(t *testing.T) {
 
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestAuthMiddleware_NoSession_GET_PassesThrough(t *testing.T) {
+	_, ts := setupHostedTestServer(t)
+
+	// GET without session passes through for anonymous public reads.
+	resp, err := http.Get(ts.URL + "/api/wanted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck // test cleanup
+
+	// Inner handler returns 500 (no client in context), but the middleware
+	// itself did NOT block — it passed the request through.
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusPreconditionFailed {
+		t.Errorf("expected pass-through for anonymous GET, got %d", resp.StatusCode)
 	}
 }
 
@@ -223,7 +242,8 @@ func TestAuthMiddleware_MultiWasteland_NoHeader_Returns400(t *testing.T) {
 
 	sessionID, _ := sessions.Create("conn-1")
 
-	req, _ := http.NewRequest("GET", ts.URL+"/api/wanted", nil)
+	// Mutations without X-Wasteland header get 400.
+	req, _ := http.NewRequest("POST", ts.URL+"/api/wanted", nil)
 	req.AddCookie(&http.Cookie{
 		Name:  cookieName,
 		Value: SignSessionCookie(sessionID, "conn-1", testSecret),
@@ -270,7 +290,8 @@ func TestAuthMiddleware_UnknownUpstream(t *testing.T) {
 
 	sessionID, _ := sessions.Create("conn-1")
 
-	req, _ := http.NewRequest("GET", ts.URL+"/api/wanted", nil)
+	// Mutations with unknown upstream get 400.
+	req, _ := http.NewRequest("POST", ts.URL+"/api/wanted", nil)
 	req.AddCookie(&http.Cookie{
 		Name:  cookieName,
 		Value: SignSessionCookie(sessionID, "conn-1", testSecret),
@@ -292,7 +313,7 @@ func TestAuthMiddleware_ExpiredSession(t *testing.T) {
 	_, ts := setupHostedTestServer(t)
 
 	// Use a session ID that doesn't exist in the store.
-	req, _ := http.NewRequest("GET", ts.URL+"/api/wanted", nil)
+	req, _ := http.NewRequest("POST", ts.URL+"/api/wanted", nil)
 	req.AddCookie(&http.Cookie{
 		Name:  cookieName,
 		Value: SignSessionID("nonexistent", testSecret),
@@ -315,7 +336,7 @@ func TestAuthMiddleware_NoConnectionID(t *testing.T) {
 	// Create session without connection ID (old format cookie).
 	sessionID, _ := sessions.Create("")
 
-	req, _ := http.NewRequest("GET", ts.URL+"/api/wanted", nil)
+	req, _ := http.NewRequest("POST", ts.URL+"/api/wanted", nil)
 	req.AddCookie(&http.Cookie{
 		Name:  cookieName,
 		Value: SignSessionID(sessionID, testSecret),
@@ -755,9 +776,9 @@ func TestAuthMiddleware_RehydrateFails_InvalidConnection(t *testing.T) {
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 
-	// Cookie with connectionID that Nango rejects.
+	// Cookie with connectionID that Nango rejects — mutations get 401.
 	signed := SignSessionCookie("sess-revoked", "conn-revoked", testSecret)
-	req, _ := http.NewRequest("GET", ts.URL+"/api/wanted", nil)
+	req, _ := http.NewRequest("POST", ts.URL+"/api/wanted", nil)
 	req.AddCookie(&http.Cookie{Name: cookieName, Value: signed})
 
 	resp, err := http.DefaultClient.Do(req)
@@ -774,9 +795,9 @@ func TestAuthMiddleware_RehydrateFails_InvalidConnection(t *testing.T) {
 func TestAuthMiddleware_OldFormatCookie_NoRehydration(t *testing.T) {
 	_, ts := setupHostedTestServer(t)
 
-	// Old-format cookie (no connectionID) for a session not in store → 401.
+	// Old-format cookie (no connectionID) for a session not in store — mutations get 401.
 	signed := SignSessionID("old-sess", testSecret)
-	req, _ := http.NewRequest("GET", ts.URL+"/api/wanted", nil)
+	req, _ := http.NewRequest("POST", ts.URL+"/api/wanted", nil)
 	req.AddCookie(&http.Cookie{Name: cookieName, Value: signed})
 
 	resp, err := http.DefaultClient.Do(req)

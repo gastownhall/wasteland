@@ -160,6 +160,11 @@ func runServe(cmd *cobra.Command, stdout, stderr io.Writer) error {
 
 	server := api.New(client)
 
+	scoreboardCache := api.NewScoreboardCache(db, 5*time.Minute)
+	server.SetScoreboard(scoreboardCache)
+	scoreboardCache.Start()
+	defer scoreboardCache.Stop()
+
 	generalRL := api.RateLimit(api.NewRateLimiter(120, 120, time.Minute))
 	bodyLimit := api.MaxBytesBody(64 << 10) // 64 KB
 	handler := api.RequestLog(logger)(api.SecurityHeaders(generalRL(bodyLimit(api.SPAHandler(server, web.Assets)))))
@@ -208,6 +213,19 @@ func runServeHosted(cmd *cobra.Command, stdout, _ io.Writer) error {
 
 	// Build the API server with hosted workspace resolution.
 	apiServer := api.NewHostedWorkspace(hosted.NewClientFunc(), hosted.NewWorkspaceFunc())
+
+	// Public read-only RemoteDB against hop/wl-commons (no token needed).
+	publicDB := backend.NewRemoteDB("", "hop", "wl-commons", "hop", "wl-commons", "")
+
+	// Scoreboard cache.
+	scoreboardCache := api.NewScoreboardCache(publicDB, 5*time.Minute)
+	apiServer.SetScoreboard(scoreboardCache)
+	scoreboardCache.Start()
+	defer scoreboardCache.Stop()
+
+	// Anonymous client for unauthenticated public reads (browse, detail, etc.).
+	anonClient := sdk.New(sdk.ClientConfig{DB: publicDB})
+	apiServer.SetPublicClient(anonClient)
 
 	// Build the hosted server and compose handlers.
 	hostedServer := hosted.NewServer(resolver, sessions, nangoClient, sessionSecret)

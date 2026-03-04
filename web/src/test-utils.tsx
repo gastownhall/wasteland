@@ -5,6 +5,8 @@ import type {
   ConfigResponse,
   DashboardResponse,
   DetailResponse,
+  ScoreboardEntry,
+  ScoreboardResponse,
   WantedItem,
   WantedSummary,
 } from "./api/types";
@@ -94,6 +96,30 @@ export function makeConfigResponse(overrides: Partial<ConfigResponse> = {}): Con
   return {
     rig_handle: "alice",
     mode: "wild-west",
+    ...overrides,
+  };
+}
+
+export function makeScoreboardResponse(overrides: Partial<ScoreboardResponse> = {}): ScoreboardResponse {
+  return {
+    entries: [],
+    updated_at: "2026-03-04T12:00:00Z",
+    ...overrides,
+  };
+}
+
+export function makeScoreboardEntry(overrides: Partial<ScoreboardEntry> = {}): ScoreboardEntry {
+  return {
+    rig_handle: "alice",
+    display_name: "Alice Chen",
+    trust_tier: "settler",
+    stamp_count: 5,
+    weighted_score: 12,
+    unique_towns: 3,
+    completions: 4,
+    avg_quality: 4.0,
+    avg_reliability: 3.8,
+    top_skills: ["go", "sql"],
     ...overrides,
   };
 }

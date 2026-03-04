@@ -27,8 +27,9 @@ type fakeDB struct {
 	completions     map[string]string // wanted_id -> completion_id
 	branches        map[string]bool
 	branchItems     map[string]map[string]*fakeItem
-	leaderboardCSV  string // CSV response for leaderboard aggregation query
-	leaderSkillsCSV string // CSV response for leaderboard skills query
+	leaderboardCSV  string            // CSV response for leaderboard aggregation query
+	leaderSkillsCSV string            // CSV response for leaderboard skills query
+	results         map[string]string // generic: sql substring -> CSV output
 }
 
 func newFakeDB() *fakeDB {
@@ -43,6 +44,13 @@ func newFakeDB() *fakeDB {
 func (f *fakeDB) Query(sql, ref string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
+	// Generic results map takes priority (used by scoreboard tests).
+	for key, val := range f.results {
+		if strings.Contains(sql, key) {
+			return val, nil
+		}
+	}
 
 	switch {
 	case strings.Contains(sql, "FROM wanted") && strings.Contains(sql, "WHERE id"):
@@ -262,6 +270,17 @@ func newTestServer(db *fakeDB, mode string) *httptest.Server {
 	})
 	srv := New(client)
 	return httptest.NewServer(srv)
+}
+
+func newTestClient(db *fakeDB) *sdk.Client {
+	return sdk.New(sdk.ClientConfig{
+		DB:        db,
+		RigHandle: "alice",
+		Mode:      "wild-west",
+		SaveConfig: func(_ string, _ bool) error {
+			return nil
+		},
+	})
 }
 
 func getJSON(t *testing.T, ts *httptest.Server, path string, v any) *http.Response {

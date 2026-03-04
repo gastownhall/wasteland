@@ -51,6 +51,10 @@ func (s *Server) Handler(apiServer *api.Server, assets fs.FS) http.Handler {
 	mux.Handle("POST /api/auth/join", authRL(http.HandlerFunc(s.handleJoin)))
 	mux.Handle("DELETE /api/auth/wastelands/{upstream...}", authRL(http.HandlerFunc(s.handleLeaveWasteland)))
 
+	// Public scoreboard endpoint (no auth, bypasses middleware).
+	mux.HandleFunc("GET /api/scoreboard", apiServer.ScoreboardHandler())
+	mux.HandleFunc("OPTIONS /api/scoreboard", apiServer.ScoreboardHandler())
+
 	// All other routes go through rate limit -> auth middleware -> SPA handler.
 	mux.Handle("/", generalRL(s.AuthMiddleware(api.SPAHandler(apiServer, assets))))
 

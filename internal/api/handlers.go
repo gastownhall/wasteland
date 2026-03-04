@@ -9,9 +9,13 @@ import (
 
 // resolveClient extracts the sdk.Client from the request. Returns false if
 // the client cannot be resolved (writes a 401 error to w in that case).
+// For GET requests, falls back to the anonymous public client if available.
 func (s *Server) resolveClient(w http.ResponseWriter, r *http.Request) (*sdk.Client, bool) {
 	client, err := s.clientFunc(r)
 	if err != nil {
+		if r.Method == http.MethodGet && s.publicClient != nil {
+			return s.publicClient, true
+		}
 		writeError(w, http.StatusUnauthorized, "not authenticated")
 		return nil, false
 	}

@@ -13,6 +13,7 @@ import type {
   PostInput,
   ProfileResponse,
   ProfileSummary,
+  ScoreboardResponse,
   SettingsInput,
   UpdateInput,
 } from "./types";
@@ -106,6 +107,10 @@ export async function dashboard(): Promise<DashboardResponse> {
 
 export async function config(): Promise<ConfigResponse> {
   return request<ConfigResponse>("/api/config");
+}
+
+export async function scoreboard(): Promise<ScoreboardResponse> {
+  return request<ScoreboardResponse>("/api/scoreboard");
 }
 
 export async function claim(id: string): Promise<MutationResponse> {

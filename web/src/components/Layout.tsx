@@ -27,6 +27,13 @@ export function Layout() {
         action: () => navigate("/me"),
       },
       {
+        id: "nav-scoreboard",
+        label: "Go to Scoreboard",
+        group: "Navigation",
+        shortcut: "g l",
+        action: () => navigate("/scoreboard"),
+      },
+      {
         id: "nav-settings",
         label: "Go to Settings",
         group: "Navigation",
@@ -82,6 +89,9 @@ export function Layout() {
           </NavLink>
           <NavLink to="/profile" className={({ isActive }) => (isActive ? styles.navLinkActive : styles.navLink)}>
             profiles
+          </NavLink>
+          <NavLink to="/scoreboard" className={({ isActive }) => (isActive ? styles.navLinkActive : styles.navLink)}>
+            scoreboard
           </NavLink>
           <NavLink to="/settings" className={({ isActive }) => (isActive ? styles.navLinkActive : styles.navLink)}>
             settings

@@ -23,6 +23,8 @@ type Server struct {
 	clientFunc    ClientFunc
 	workspaceFunc WorkspaceFunc
 	pile          pile.RowQuerier
+	scoreboard    *ScoreboardCache
+	publicClient  *sdk.Client // anonymous fallback for public reads (hosted mode)
 	mux           *http.ServeMux
 	hosted        bool // true when running in multi-tenant hosted mode
 }
@@ -74,6 +76,21 @@ func NewWithClientFunc(fn ClientFunc) *Server {
 // SetProfileQuerier replaces the profile data source (useful for testing).
 func (s *Server) SetProfileQuerier(pq pile.RowQuerier) {
 	s.pile = pq
+}
+
+// SetScoreboard sets the scoreboard cache for the public scoreboard endpoint.
+func (s *Server) SetScoreboard(sc *ScoreboardCache) {
+	s.scoreboard = sc
+}
+
+// SetPublicClient sets an anonymous SDK client for unauthenticated public reads.
+func (s *Server) SetPublicClient(c *sdk.Client) {
+	s.publicClient = c
+}
+
+// ScoreboardHandler returns an http.HandlerFunc for the scoreboard endpoint.
+func (s *Server) ScoreboardHandler() http.HandlerFunc {
+	return s.handleScoreboard
 }
 
 // ServeHTTP implements http.Handler.
