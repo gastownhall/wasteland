@@ -489,20 +489,40 @@ func TestDoltHubProvider_ListPendingWantedIDs(t *testing.T) {
 	})
 	mux.HandleFunc("/upstream-org/wl-commons/pulls/1", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"from_branch": "wl/alice/fix-login",
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"from_branch":       "wl/alice/fix-login",
+			"from_branch_owner": "alice-fork",
 		})
 	})
 	mux.HandleFunc("/upstream-org/wl-commons/pulls/2", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"from_branch": "wl/bob/add-feature",
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"from_branch":       "wl/bob/add-feature",
+			"from_branch_owner": "bob-fork",
+		})
+	})
+	// Mock fork branch SQL queries.
+	mux.HandleFunc("/alice-fork/wl-commons/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"rows": []map[string]string{
+				{"status": "claimed", "claimed_by": "alice"},
+			},
+		})
+	})
+	mux.HandleFunc("/bob-fork/wl-commons/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"rows": []map[string]string{
+				{"status": "in_review", "claimed_by": "bob"},
+			},
 		})
 	})
 
 	server := httptest.NewServer(mux)
 	defer server.Close()
 	dolthubAPIBase = server.URL
+	dolthubRepoBase = server.URL + "/repositories"
 
 	provider := NewDoltHubProvider("token")
 	ids, err := provider.ListPendingWantedIDs("upstream-org", "wl-commons")
@@ -510,14 +530,30 @@ func TestDoltHubProvider_ListPendingWantedIDs(t *testing.T) {
 		t.Fatalf("ListPendingWantedIDs() error: %v", err)
 	}
 
-	if ids["fix-login"] != "alice" {
-		t.Errorf("expected fix-login → alice, got %q", ids["fix-login"])
-	}
-	if ids["add-feature"] != "bob" {
-		t.Errorf("expected add-feature → bob, got %q", ids["add-feature"])
-	}
 	if len(ids) != 2 {
-		t.Errorf("expected 2 pending IDs, got %d", len(ids))
+		t.Fatalf("expected 2 pending IDs, got %d", len(ids))
+	}
+	if pending := ids["fix-login"]; len(pending) != 1 || pending[0].RigHandle != "alice" {
+		t.Errorf("expected fix-login → alice, got %+v", pending)
+	}
+	if pending := ids["fix-login"]; len(pending) != 1 || pending[0].Status != "claimed" {
+		t.Errorf("expected fix-login status=claimed, got %+v", pending)
+	}
+	if pending := ids["fix-login"]; len(pending) != 1 || pending[0].ClaimedBy != "alice" {
+		t.Errorf("expected fix-login claimed_by=alice, got %+v", pending)
+	}
+	if pending := ids["add-feature"]; len(pending) != 1 || pending[0].RigHandle != "bob" {
+		t.Errorf("expected add-feature → bob, got %+v", pending)
+	}
+	if pending := ids["add-feature"]; len(pending) != 1 || pending[0].Status != "in_review" {
+		t.Errorf("expected add-feature status=in_review, got %+v", pending)
+	}
+	// Verify URLs are populated.
+	if pending := ids["fix-login"]; len(pending) != 1 || pending[0].PRURL == "" {
+		t.Error("expected non-empty PRURL for fix-login")
+	}
+	if pending := ids["fix-login"]; len(pending) != 1 || pending[0].BranchURL == "" {
+		t.Error("expected non-empty BranchURL for fix-login")
 	}
 }
 
@@ -536,7 +572,7 @@ func TestDoltHubProvider_ListPendingWantedIDs_SkipsNonWLBranches(t *testing.T) {
 	})
 	mux.HandleFunc("/org/db/pulls/1", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"from_branch": "feature/other-work",
 		})
 	})

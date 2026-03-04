@@ -53,6 +53,16 @@ export interface Stamp {
   message?: string;
 }
 
+export interface UpstreamPR {
+  rig_handle: string;
+  status: string;
+  claimed_by?: string;
+  branch?: string;
+  branch_url?: string;
+  pr_url?: string;
+  delta?: string;
+}
+
 export interface DetailResponse {
   item: WantedItem;
   completion?: Completion;
@@ -65,6 +75,7 @@ export interface DetailResponse {
   actions: string[];
   branch_actions: string[];
   mode: string;
+  upstream_prs?: UpstreamPR[];
 }
 
 export interface MutationResponse {

@@ -68,19 +68,31 @@ type StampJSON struct {
 	Message     string   `json:"message,omitempty"`
 }
 
+// UpstreamPRJSON is the JSON representation of a pending upstream PR.
+type UpstreamPRJSON struct {
+	RigHandle string `json:"rig_handle"`
+	Status    string `json:"status"`
+	ClaimedBy string `json:"claimed_by,omitempty"`
+	Branch    string `json:"branch,omitempty"`
+	BranchURL string `json:"branch_url,omitempty"`
+	PRURL     string `json:"pr_url,omitempty"`
+	Delta     string `json:"delta,omitempty"`
+}
+
 // DetailResponse is the JSON response for GET /api/wanted/{id}.
 type DetailResponse struct {
-	Item          *WantedItemJSON `json:"item"`
-	Completion    *CompletionJSON `json:"completion,omitempty"`
-	Stamp         *StampJSON      `json:"stamp,omitempty"`
-	Branch        string          `json:"branch,omitempty"`
-	BranchURL     string          `json:"branch_url,omitempty"`
-	MainStatus    string          `json:"main_status,omitempty"`
-	PRURL         string          `json:"pr_url,omitempty"`
-	Delta         string          `json:"delta,omitempty"`
-	Actions       []string        `json:"actions"`
-	BranchActions []string        `json:"branch_actions"`
-	Mode          string          `json:"mode"`
+	Item          *WantedItemJSON  `json:"item"`
+	Completion    *CompletionJSON  `json:"completion,omitempty"`
+	Stamp         *StampJSON       `json:"stamp,omitempty"`
+	Branch        string           `json:"branch,omitempty"`
+	BranchURL     string           `json:"branch_url,omitempty"`
+	MainStatus    string           `json:"main_status,omitempty"`
+	PRURL         string           `json:"pr_url,omitempty"`
+	Delta         string           `json:"delta,omitempty"`
+	Actions       []string         `json:"actions"`
+	BranchActions []string         `json:"branch_actions"`
+	Mode          string           `json:"mode"`
+	UpstreamPRs   []UpstreamPRJSON `json:"upstream_prs,omitempty"`
 }
 
 // MutationResponse is the JSON response for mutation endpoints.
@@ -258,6 +270,23 @@ func toDetailResponse(d *sdk.DetailResult, mode string) *DetailResponse {
 	for i, t := range d.Actions {
 		actions[i] = commons.TransitionName(t)
 	}
+	var upstreamPRs []UpstreamPRJSON
+	for _, p := range d.UpstreamPRs {
+		delta := ""
+		if p.Status != "" && d.Item != nil && p.Status != d.Item.Status {
+			delta = d.Item.Status + " → " + p.Status
+		}
+		upstreamPRs = append(upstreamPRs, UpstreamPRJSON{
+			RigHandle: p.RigHandle,
+			Status:    p.Status,
+			ClaimedBy: p.ClaimedBy,
+			Branch:    p.Branch,
+			BranchURL: p.BranchURL,
+			PRURL:     p.PRURL,
+			Delta:     delta,
+		})
+	}
+
 	return &DetailResponse{
 		Item:          toWantedItemJSON(d.Item),
 		Completion:    toCompletionJSON(d.Completion),
@@ -270,6 +299,7 @@ func toDetailResponse(d *sdk.DetailResult, mode string) *DetailResponse {
 		Actions:       actions,
 		BranchActions: d.BranchActions,
 		Mode:          mode,
+		UpstreamPRs:   upstreamPRs,
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,10 +19,10 @@ var dolthubGraphQLURL = "https://www.dolthub.com/graphql"
 // dolthubAPIBase is the DoltHub REST API base URL. Var so tests can override.
 var dolthubAPIBase = "https://www.dolthub.com/api/v1alpha1"
 
-const (
-	dolthubRemoteBase = "https://doltremoteapi.dolthub.com"
-	dolthubRepoBase   = "https://www.dolthub.com/repositories"
-)
+const dolthubRemoteBase = "https://doltremoteapi.dolthub.com"
+
+// dolthubRepoBase is the DoltHub web base URL. Var so tests can override.
+var dolthubRepoBase = "https://www.dolthub.com/repositories"
 
 // DoltHubProvider implements Provider for DoltHub-hosted databases.
 type DoltHubProvider struct {
@@ -525,16 +526,35 @@ func (d *DoltHubProvider) ClosePR(upstreamOrg, db, prID string) error {
 	return nil
 }
 
-// ListPendingWantedIDs returns a set of wanted IDs that have open upstream PRs.
-// It lists open PRs on the upstream repo, fetches each PR's detail to get the
-// from_branch, and extracts the wanted ID from the wl/{rig}/{wantedID} convention.
-func (d *DoltHubProvider) ListPendingWantedIDs(upstreamOrg, db string) (map[string]string, error) {
+// PendingWantedState represents the state of a wanted item from a pending upstream PR's fork branch.
+type PendingWantedState struct {
+	RigHandle string
+	Status    string
+	ClaimedBy string
+	Branch    string // e.g. "wl/alice/w-001"
+	BranchURL string // web URL for the fork branch
+	PRURL     string // web URL for the upstream PR
+}
+
+// ListPendingWantedIDs returns wanted IDs that have open upstream PRs, with
+// the real state from each PR's fork branch. It lists open PRs, fetches each
+// PR's detail for the from_branch, then queries the fork branch in parallel
+// for the actual item status.
+func (d *DoltHubProvider) ListPendingWantedIDs(upstreamOrg, db string) (map[string][]PendingWantedState, error) {
 	pulls, err := d.listPulls(upstreamOrg, db)
 	if err != nil {
 		return nil, fmt.Errorf("listing PRs: %w", err)
 	}
 
-	ids := make(map[string]string)
+	// Collect PR details (sequential — existing behavior).
+	type prInfo struct {
+		pullID          string
+		fromBranch      string
+		fromBranchOwner string
+		rigHandle       string
+		wantedID        string
+	}
+	var prs []prInfo
 	for _, pr := range pulls {
 		if !strings.EqualFold(pr.State, "open") {
 			continue
@@ -545,12 +565,12 @@ func (d *DoltHubProvider) ListPendingWantedIDs(upstreamOrg, db string) (map[stri
 			continue
 		}
 		var prDetail struct {
-			FromBranch string `json:"from_branch"`
+			FromBranch      string `json:"from_branch"`
+			FromBranchOwner string `json:"from_branch_owner"`
 		}
 		if err := json.Unmarshal(detail, &prDetail); err != nil {
 			continue
 		}
-		// Extract rig handle and wanted ID from wl/{rig}/{wantedID} convention.
 		if !strings.HasPrefix(prDetail.FromBranch, "wl/") {
 			continue
 		}
@@ -561,11 +581,83 @@ func (d *DoltHubProvider) ListPendingWantedIDs(upstreamOrg, db string) (map[stri
 		}
 		rigHandle := rest[:slashIdx]
 		wantedID := rest[slashIdx+1:]
-		if wantedID != "" {
-			ids[wantedID] = rigHandle
+		if wantedID == "" {
+			continue
 		}
+		prs = append(prs, prInfo{
+			pullID:          pr.PullID,
+			fromBranch:      prDetail.FromBranch,
+			fromBranchOwner: prDetail.FromBranchOwner,
+			rigHandle:       rigHandle,
+			wantedID:        wantedID,
+		})
+	}
+
+	// Query fork branches in parallel for real item state.
+	type indexedResult struct {
+		idx   int
+		state PendingWantedState
+	}
+	results := make(chan indexedResult, len(prs))
+	var wg sync.WaitGroup
+
+	for i, pr := range prs {
+		wg.Add(1)
+		go func(idx int, pr prInfo) {
+			defer wg.Done()
+
+			prURL := fmt.Sprintf("%s/%s/%s/pulls/%s", dolthubRepoBase, upstreamOrg, db, pr.pullID)
+			branchURL := fmt.Sprintf("%s/%s/%s/data/%s",
+				dolthubRepoBase, pr.fromBranchOwner, db, url.PathEscape(pr.fromBranch))
+
+			state := PendingWantedState{
+				RigHandle: pr.rigHandle,
+				Branch:    pr.fromBranch,
+				BranchURL: branchURL,
+				PRURL:     prURL,
+			}
+
+			// Query the fork branch for the item's actual status.
+			owner := pr.fromBranchOwner
+			if owner == "" {
+				owner = upstreamOrg
+			}
+			q := fmt.Sprintf("SELECT status, claimed_by FROM wanted WHERE id='%s'", pr.wantedID)
+			queryURL := fmt.Sprintf("%s/%s/%s/%s?q=%s",
+				dolthubAPIBase, owner, db, url.PathEscape(pr.fromBranch), url.QueryEscape(q))
+
+			body, err := d.dolthubGet(queryURL)
+			if err == nil {
+				var qr queryResponse
+				if json.Unmarshal(body, &qr) == nil && len(qr.Rows) > 0 {
+					if v, ok := qr.Rows[0]["status"]; ok {
+						state.Status = v
+					}
+					if v, ok := qr.Rows[0]["claimed_by"]; ok {
+						state.ClaimedBy = v
+					}
+				}
+			}
+			// If fork query fails, still include with empty status (rig handle is known).
+
+			results <- indexedResult{idx: idx, state: state}
+		}(i, pr)
+	}
+
+	wg.Wait()
+	close(results)
+
+	ids := make(map[string][]PendingWantedState)
+	for r := range results {
+		wantedID := prs[r.idx].wantedID
+		ids[wantedID] = append(ids[wantedID], r.state)
 	}
 	return ids, nil
+}
+
+// queryResponse represents the DoltHub SQL API JSON response.
+type queryResponse struct {
+	Rows []map[string]string `json:"rows"`
 }
 
 // Type returns "dolthub".

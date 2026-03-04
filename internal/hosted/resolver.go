@@ -162,8 +162,27 @@ func (wr *WorkspaceResolver) buildClient(wl *WastelandConfig, rigHandle, connect
 			}
 			return provider.ClosePR(upOrg, upDB, prID)
 		},
-		ListPendingItems: func() (map[string]string, error) {
-			return provider.ListPendingWantedIDs(upOrg, upDB)
+		ListPendingItems: func() (map[string][]sdk.PendingItem, error) {
+			states, err := provider.ListPendingWantedIDs(upOrg, upDB)
+			if err != nil {
+				return nil, err
+			}
+			result := make(map[string][]sdk.PendingItem, len(states))
+			for id, pending := range states {
+				items := make([]sdk.PendingItem, len(pending))
+				for i, p := range pending {
+					items[i] = sdk.PendingItem{
+						RigHandle: p.RigHandle,
+						Status:    p.Status,
+						ClaimedBy: p.ClaimedBy,
+						Branch:    p.Branch,
+						BranchURL: p.BranchURL,
+						PRURL:     p.PRURL,
+					}
+				}
+				result[id] = items
+			}
+			return result, nil
 		},
 		BranchURL: branchURL,
 		Signing:   wl.Signing,

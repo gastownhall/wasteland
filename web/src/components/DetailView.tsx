@@ -217,7 +217,19 @@ export function DetailView() {
   if (error) return <p className={styles.errorText}>{error}</p>;
   if (!data || !data.item) return <p className={styles.notFound}>Not found.</p>;
 
-  const { item, completion, stamp, branch, branch_url, main_status, pr_url, delta, actions, branch_actions } = data;
+  const {
+    item,
+    completion,
+    stamp,
+    branch,
+    branch_url,
+    main_status,
+    pr_url,
+    delta,
+    actions,
+    branch_actions,
+    upstream_prs,
+  } = data;
   const branchActions = branch_actions || [];
   const displayStatus = optimisticStatus || item.status;
   const canEdit = rigHandle && rigHandle === item.posted_by;
@@ -288,6 +300,36 @@ export function DetailView() {
           </>
         )}
       </div>
+
+      {upstream_prs && upstream_prs.length > 0 && (
+        <Section title="Upstream PRs">
+          <div className={styles.sectionContent}>
+            {upstream_prs.map((pr, i) => (
+              <div key={i} className={styles.sectionText}>
+                <span className={styles.highlightBrass}>{pr.rig_handle}</span>
+                {": "}
+                {pr.delta || pr.status}
+                {pr.pr_url && (
+                  <>
+                    {" "}
+                    <a href={pr.pr_url} target="_blank" rel="noopener noreferrer" className={styles.prLink}>
+                      PR
+                    </a>
+                  </>
+                )}
+                {pr.branch_url && (
+                  <>
+                    {" "}
+                    <a href={pr.branch_url} target="_blank" rel="noopener noreferrer" className={styles.prLink}>
+                      branch
+                    </a>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
 
       {completion && (
         <Section title="Completion">

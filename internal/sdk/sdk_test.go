@@ -782,8 +782,10 @@ func TestBrowse_PendingClaimedBy_Single(t *testing.T) {
 		DB:        db,
 		RigHandle: "alice",
 		Mode:      "wild-west",
-		ListPendingItems: func() (map[string]string, error) {
-			return map[string]string{"w-1": "charlie"}, nil
+		ListPendingItems: func() (map[string][]PendingItem, error) {
+			return map[string][]PendingItem{
+				"w-1": {{RigHandle: "charlie", Status: "claimed", ClaimedBy: "charlie"}},
+			}, nil
 		},
 	})
 
@@ -811,6 +813,48 @@ func TestBrowse_PendingClaimedBy_Single(t *testing.T) {
 	}
 }
 
+func TestBrowse_PendingFurthestState(t *testing.T) {
+	db := newFakeDB()
+	db.seedItem(fakeItem{ID: "w-1", Title: "Fix bug", Status: "open", Priority: 1, PostedBy: "alice", EffortLevel: "medium"})
+
+	c := New(ClientConfig{
+		DB:        db,
+		RigHandle: "alice",
+		Mode:      "wild-west",
+		ListPendingItems: func() (map[string][]PendingItem, error) {
+			return map[string][]PendingItem{
+				"w-1": {
+					{RigHandle: "charlie", Status: "claimed", ClaimedBy: "charlie"},
+					{RigHandle: "dave", Status: "in_review", ClaimedBy: "dave"},
+				},
+			}, nil
+		},
+	})
+
+	result, err := c.Browse(commons.BrowseFilter{})
+	if err != nil {
+		t.Fatalf("Browse: %v", err)
+	}
+
+	for _, item := range result.Items {
+		if item.ID == "w-1" {
+			// Furthest state is "in_review" from dave.
+			if item.Status != "in_review" {
+				t.Errorf("w-1: expected Status='in_review' (furthest), got %q", item.Status)
+			}
+			if item.ClaimedBy != "dave (pending)" {
+				t.Errorf("w-1: expected ClaimedBy='dave (pending)', got %q", item.ClaimedBy)
+			}
+			// Badge count should be 2.
+			if result.PendingIDs["w-1"] != 2 {
+				t.Errorf("expected PendingIDs[w-1]=2, got %d", result.PendingIDs["w-1"])
+			}
+			return
+		}
+	}
+	t.Error("w-1 not found in results")
+}
+
 func TestBrowse_PendingClaimedBy_PreservesExisting(t *testing.T) {
 	db := newFakeDB()
 	// In PR mode, branch overlays set ClaimedBy before upstream merge.
@@ -825,8 +869,10 @@ func TestBrowse_PendingClaimedBy_PreservesExisting(t *testing.T) {
 		DB:        db,
 		RigHandle: "bob",
 		Mode:      "pr",
-		ListPendingItems: func() (map[string]string, error) {
-			return map[string]string{"w-1": "charlie"}, nil
+		ListPendingItems: func() (map[string][]PendingItem, error) {
+			return map[string][]PendingItem{
+				"w-1": {{RigHandle: "charlie", Status: "claimed", ClaimedBy: "charlie"}},
+			}, nil
 		},
 	})
 
@@ -837,7 +883,7 @@ func TestBrowse_PendingClaimedBy_PreservesExisting(t *testing.T) {
 
 	for _, item := range result.Items {
 		if item.ID == "w-1" {
-			// Branch overlay set ClaimedBy="bob"; upstream should NOT overwrite.
+			// Branch overlay set ClaimedBy="bob"; upstream with same rank should NOT overwrite.
 			if item.ClaimedBy != "bob" {
 				t.Errorf("w-1: expected ClaimedBy='bob' (from branch overlay), got %q", item.ClaimedBy)
 			}
@@ -845,6 +891,38 @@ func TestBrowse_PendingClaimedBy_PreservesExisting(t *testing.T) {
 		}
 	}
 	t.Error("w-1 not found in results")
+}
+
+func TestDetail_UpstreamPRs(t *testing.T) {
+	db := newFakeDB()
+	db.seedItem(fakeItem{ID: "w-1", Title: "Fix bug", Status: "open", Priority: 1, PostedBy: "alice", EffortLevel: "medium"})
+
+	c := New(ClientConfig{
+		DB:        db,
+		RigHandle: "bob",
+		Mode:      "wild-west",
+		ListPendingItems: func() (map[string][]PendingItem, error) {
+			return map[string][]PendingItem{
+				"w-1": {
+					{RigHandle: "charlie", Status: "claimed", Branch: "wl/charlie/w-1", PRURL: "https://example.com/pr/1"},
+				},
+			}, nil
+		},
+	})
+
+	result, err := c.Detail("w-1")
+	if err != nil {
+		t.Fatalf("Detail: %v", err)
+	}
+	if len(result.UpstreamPRs) != 1 {
+		t.Fatalf("expected 1 upstream PR, got %d", len(result.UpstreamPRs))
+	}
+	if result.UpstreamPRs[0].RigHandle != "charlie" {
+		t.Errorf("expected rig_handle=charlie, got %q", result.UpstreamPRs[0].RigHandle)
+	}
+	if result.UpstreamPRs[0].PRURL != "https://example.com/pr/1" {
+		t.Errorf("expected PRURL, got %q", result.UpstreamPRs[0].PRURL)
+	}
 }
 
 func TestDetail_WildWest(t *testing.T) {

@@ -15,6 +15,7 @@ import (
 	"github.com/julianknutsen/wasteland/internal/commons"
 	"github.com/julianknutsen/wasteland/internal/federation"
 	"github.com/julianknutsen/wasteland/internal/remote"
+	"github.com/julianknutsen/wasteland/internal/sdk"
 	"github.com/julianknutsen/wasteland/internal/style"
 	"github.com/spf13/cobra"
 )
@@ -809,7 +810,7 @@ func closePRForBranch(cfg *federation.Config, branch string) error {
 // listPendingItemsFromPRs returns a callback that lists wanted IDs with open
 // upstream PRs. Uses a 30-second TTL cache to avoid hammering the API.
 // Returns nil if the provider type does not support PR listing.
-func listPendingItemsFromPRs(cfg *federation.Config) func() (map[string]string, error) {
+func listPendingItemsFromPRs(cfg *federation.Config) func() (map[string][]sdk.PendingItem, error) {
 	switch cfg.ResolveProviderType() {
 	case "dolthub":
 		return dolthubListPendingItems(cfg)
@@ -824,7 +825,7 @@ func listPendingItemsFromPRs(cfg *federation.Config) func() (map[string]string, 
 	}
 }
 
-func dolthubListPendingItems(cfg *federation.Config) func() (map[string]string, error) {
+func dolthubListPendingItems(cfg *federation.Config) func() (map[string][]sdk.PendingItem, error) {
 	token := commons.DoltHubToken()
 	if token == "" {
 		return nil
@@ -836,36 +837,51 @@ func dolthubListPendingItems(cfg *federation.Config) func() (map[string]string, 
 
 	var (
 		mu       sync.Mutex
-		cached   map[string]string
+		cached   map[string][]sdk.PendingItem
 		cachedAt time.Time
 		cacheTTL = 30 * time.Second
 	)
 
-	return func() (map[string]string, error) {
+	return func() (map[string][]sdk.PendingItem, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		if cached != nil && time.Since(cachedAt) < cacheTTL {
 			return cached, nil
 		}
 		provider := remote.NewDoltHubProvider(token)
-		ids, err := provider.ListPendingWantedIDs(upstreamOrg, db)
+		states, err := provider.ListPendingWantedIDs(upstreamOrg, db)
 		if err != nil {
 			return nil, err
 		}
-		cached = ids
+		result := make(map[string][]sdk.PendingItem, len(states))
+		for id, pending := range states {
+			items := make([]sdk.PendingItem, len(pending))
+			for i, p := range pending {
+				items[i] = sdk.PendingItem{
+					RigHandle: p.RigHandle,
+					Status:    p.Status,
+					ClaimedBy: p.ClaimedBy,
+					Branch:    p.Branch,
+					BranchURL: p.BranchURL,
+					PRURL:     p.PRURL,
+				}
+			}
+			result[id] = items
+		}
+		cached = result
 		cachedAt = time.Now()
 		return cached, nil
 	}
 }
 
-func ghListPendingItems(ghPath, upstreamRepo string) func() (map[string]string, error) {
+func ghListPendingItems(ghPath, upstreamRepo string) func() (map[string][]sdk.PendingItem, error) {
 	var (
 		mu       sync.Mutex
-		cached   map[string]string
+		cached   map[string][]sdk.PendingItem
 		cachedAt time.Time
 		cacheTTL = 30 * time.Second
 	)
-	return func() (map[string]string, error) {
+	return func() (map[string][]sdk.PendingItem, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		if cached != nil && time.Since(cachedAt) < cacheTTL {
@@ -885,11 +901,13 @@ func ghListPendingItems(ghPath, upstreamRepo string) func() (map[string]string, 
 		if err := json.Unmarshal(out, &prs); err != nil {
 			return nil, fmt.Errorf("parsing GitHub PRs: %w", err)
 		}
-		ids := make(map[string]string)
+		ids := make(map[string][]sdk.PendingItem)
 		for _, pr := range prs {
 			parts := strings.SplitN(pr.Head.Ref, "/", 3)
 			if len(parts) == 3 && parts[0] == "wl" {
-				ids[parts[2]] = parts[1]
+				ids[parts[2]] = append(ids[parts[2]], sdk.PendingItem{
+					RigHandle: parts[1],
+				})
 			}
 		}
 		cached = ids

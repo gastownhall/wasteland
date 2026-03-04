@@ -25,8 +25,8 @@ type ClientConfig struct {
 	ClosePR          func(branch string) error // close the PR for the given branch
 	LoadDiff         func(branch string) (string, error)
 	SaveConfig       func(mode string, signing bool) error
-	ListPendingItems func() (map[string]string, error) // returns wanted IDs with open upstream PRs (ID → rig handle)
-	BranchURL        func(branch string) string        // returns a web URL for the branch
+	ListPendingItems func() (map[string][]PendingItem, error) // returns wanted IDs with pending upstream PR state
+	BranchURL        func(branch string) string               // returns a web URL for the branch
 }
 
 // Client provides mode-aware operations against the Wasteland wanted board.
@@ -49,8 +49,8 @@ type Client struct {
 	LoadDiff func(branch string) (string, error)
 	// SaveConfig persists mode and signing settings. Nil disables the feature.
 	SaveConfig func(mode string, signing bool) error
-	// ListPendingItems returns wanted IDs that have open upstream PRs (ID → rig handle). Nil disables the feature.
-	ListPendingItems func() (map[string]string, error)
+	// ListPendingItems returns wanted IDs with pending upstream PR state. Nil disables the feature.
+	ListPendingItems func() (map[string][]PendingItem, error)
 	// BranchURL returns a web URL for the given branch. Nil disables the feature.
 	BranchURL func(branch string) string
 }

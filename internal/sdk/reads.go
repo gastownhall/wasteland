@@ -4,10 +4,26 @@ import (
 	"github.com/julianknutsen/wasteland/internal/commons"
 )
 
+// PendingItem represents state from a pending upstream PR's fork branch.
+type PendingItem struct {
+	RigHandle string
+	Status    string
+	ClaimedBy string
+	Branch    string // e.g. "wl/alice/w-001"
+	BranchURL string // web URL for the fork branch
+	PRURL     string // web URL for the upstream PR
+}
+
+// stateRank defines lifecycle ordering for furthest-future state overlay.
+var stateRank = map[string]int{
+	"open": 0, "claimed": 1, "in_review": 2, "completed": 3,
+}
+
 // BrowseResult holds the items returned by Browse along with branch metadata.
 type BrowseResult struct {
-	Items      []commons.WantedSummary
-	PendingIDs map[string]int // wanted IDs with pending changes; value is the count of PRs/branches
+	Items           []commons.WantedSummary
+	PendingIDs      map[string]int           // wanted IDs with pending changes; value is the count of PRs/branches
+	UpstreamPending map[string][]PendingItem // for detail view consumption
 }
 
 // DetailResult holds the full picture of a wanted item for display.
@@ -24,6 +40,7 @@ type DetailResult struct {
 	// BranchActions are mode-aware branch operations: "submit_pr", "apply", "discard".
 	// Computed by the SDK based on mode, branch state, delta, and existing PR.
 	BranchActions []string
+	UpstreamPRs   []PendingItem // pending upstream PRs for this item
 }
 
 // Browse queries the wanted board with filters, applying branch overlays in PR mode.
@@ -33,41 +50,51 @@ func (c *Client) Browse(filter commons.BrowseFilter) (*BrowseResult, error) {
 		return nil, err
 	}
 
-	// In "all" view, merge upstream PR IDs if the callback is set.
-	var upstreamIDs map[string]string
+	// In "all" view, merge upstream PR state if the callback is set.
+	var upstreamItems map[string][]PendingItem
 	view := filter.View
 	if view == "" {
 		view = "all"
 	}
 	if view == "all" && c.ListPendingItems != nil {
-		upstreamIDs, err = c.ListPendingItems()
+		upstreamItems, err = c.ListPendingItems()
 		if err == nil {
-			for id := range upstreamIDs {
-				if pendingIDs[id] == 0 {
-					pendingIDs[id] = 1
-				}
+			for id, pending := range upstreamItems {
+				pendingIDs[id] += len(pending)
 			}
 		}
 	}
 
-	// Overlay pending PR state onto items not already changed on main.
-	// Without this, items show a "pending" badge but status stays "open"
-	// which is contradictory — pending implies a state change happened.
+	// Overlay furthest upstream state onto items.
 	for i := range items {
-		if items[i].ClaimedBy == "" && pendingIDs[items[i].ID] > 0 {
-			if pendingIDs[items[i].ID] > 1 {
-				items[i].ClaimedBy = "Multiple (pending)"
-			} else if rig := upstreamIDs[items[i].ID]; rig != "" {
-				items[i].ClaimedBy = rig + " (pending)"
+		pending := upstreamItems[items[i].ID]
+		if len(pending) == 0 {
+			continue
+		}
+		// Find the PR with the furthest-future state.
+		best := pending[0]
+		for _, p := range pending[1:] {
+			if stateRank[p.Status] > stateRank[best.Status] {
+				best = p
 			}
-			// A pending claim means the item is effectively claimed, not open.
-			if items[i].Status == "open" {
-				items[i].Status = "claimed"
+		}
+		// Only overlay if upstream state is further than current.
+		if stateRank[best.Status] > stateRank[items[i].Status] {
+			items[i].Status = best.Status
+			if best.ClaimedBy != "" {
+				items[i].ClaimedBy = best.ClaimedBy + " (pending)"
+			}
+		} else if items[i].ClaimedBy == "" && best.RigHandle != "" {
+			// Status not further, but no claimed_by yet — show rig handle.
+			if len(pending) > 1 {
+				items[i].ClaimedBy = "Multiple (pending)"
+			} else {
+				items[i].ClaimedBy = best.RigHandle + " (pending)"
 			}
 		}
 	}
 
-	return &BrowseResult{Items: items, PendingIDs: pendingIDs}, nil
+	return &BrowseResult{Items: items, PendingIDs: pendingIDs, UpstreamPending: upstreamItems}, nil
 }
 
 // Detail fetches the complete state of a wanted item including actions.
@@ -107,6 +134,7 @@ func (c *Client) detailPR(wantedID string) (*DetailResult, error) {
 		result.BranchURL = c.BranchURL(state.BranchName)
 	}
 	result.BranchActions = c.computeBranchActions(result)
+	result.UpstreamPRs = c.fetchUpstreamPRs(wantedID)
 	return result, nil
 }
 
@@ -115,12 +143,26 @@ func (c *Client) detailWildWest(wantedID string) (*DetailResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &DetailResult{
+	result := &DetailResult{
 		Item:       item,
 		Completion: completion,
 		Stamp:      stamp,
 		Actions:    commons.AvailableTransitions(item, c.rigHandle),
-	}, nil
+	}
+	result.UpstreamPRs = c.fetchUpstreamPRs(wantedID)
+	return result, nil
+}
+
+// fetchUpstreamPRs returns pending upstream PRs for a specific item.
+func (c *Client) fetchUpstreamPRs(wantedID string) []PendingItem {
+	if c.ListPendingItems == nil {
+		return nil
+	}
+	upstream, err := c.ListPendingItems()
+	if err != nil {
+		return nil
+	}
+	return upstream[wantedID]
 }
 
 // ComputeBranchActions returns the mode-aware branch operations available
