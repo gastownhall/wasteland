@@ -108,15 +108,16 @@ export function ProfileView() {
 }
 
 function DimensionBar({ label, value }: { label: string; value: number }) {
-  const clamped = Math.max(0, Math.min(1, value));
-  const pct = Math.round(clamped * 100);
+  // Values are on 0-5 stamp scale
+  const clamped = Math.max(0, Math.min(5, value));
+  const pct = Math.round((clamped / 5) * 100);
   return (
     <div className={styles.barRow}>
       <span className={styles.barLabel}>{label}</span>
       <div className={styles.barTrack}>
         <div className={styles.barFill} style={{ width: `${pct}%` }} />
       </div>
-      <span className={styles.barValue}>{pct}%</span>
+      <span className={styles.barValue}>{clamped.toFixed(1)}</span>
     </div>
   );
 }

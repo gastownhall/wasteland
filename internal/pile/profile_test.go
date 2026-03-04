@@ -90,8 +90,9 @@ func TestQueryProfile_Success(t *testing.T) {
 	if profile.DisplayName != "Linus Torvalds" {
 		t.Errorf("display_name = %q, want Linus Torvalds", profile.DisplayName)
 	}
-	if profile.Quality < 0.9 {
-		t.Errorf("quality = %f, want >= 0.9", profile.Quality)
+	// 0.95 boot block value * 5 = 4.75 on stamp scale
+	if profile.Quality < 4.5 {
+		t.Errorf("quality = %f, want >= 4.5 (0.95 * 5)", profile.Quality)
 	}
 }
 
@@ -158,7 +159,8 @@ func TestParseSheetJSON_Valid(t *testing.T) {
 	if profile.DisplayName != "Test User" {
 		t.Errorf("display_name = %q, want Test User", profile.DisplayName)
 	}
-	if profile.Quality != 0.5 {
-		t.Errorf("quality = %f, want 0.5", profile.Quality)
+	// 0.5 boot block value * 5 = 2.5 on stamp scale
+	if profile.Quality != 2.5 {
+		t.Errorf("quality = %f, want 2.5 (0.5 * 5)", profile.Quality)
 	}
 }

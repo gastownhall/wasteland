@@ -27,7 +27,7 @@ type Profile struct {
 	Followers  int     `json:"followers,omitempty"`
 	AccountAge float64 `json:"account_age,omitempty"`
 
-	// Value dimensions (from sheet_json.value_dimensions, 0-1 scale)
+	// Value dimensions (normalized to 0-5 stamp scale)
 	Quality     float64 `json:"quality"`
 	Reliability float64 `json:"reliability"`
 	Creativity  float64 `json:"creativity"`
@@ -207,9 +207,10 @@ func parseSheetJSON(raw string, profile *Profile) error {
 	profile.AccountAge = sheet.Identity.AccountAge
 	profile.Followers = sheet.Identity.SocialProof.Followers
 
-	profile.Quality = sheet.ValueDimensions.Quality
-	profile.Reliability = sheet.ValueDimensions.Reliability
-	profile.Creativity = sheet.ValueDimensions.Creativity
+	// Boot block value_dimensions are 0-1 scale; normalize to 0-5 stamp scale.
+	profile.Quality = sheet.ValueDimensions.Quality * 5
+	profile.Reliability = sheet.ValueDimensions.Reliability * 5
+	profile.Creativity = sheet.ValueDimensions.Creativity * 5
 
 	// Notable projects
 	for _, np := range sheet.NotableProjects {
