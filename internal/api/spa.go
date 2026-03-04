@@ -40,14 +40,29 @@ func SPAHandler(apiHandler http.Handler, assets fs.FS) http.Handler {
 		f, err := distFS.Open(strings.TrimPrefix(path, "/"))
 		if err == nil {
 			_ = f.Close()
+			setCacheHeaders(w, path)
 			fileServer.ServeHTTP(w, r)
 			return
 		}
 
 		// Fallback to index.html for client-side routing.
+		// No cache — must revalidate to pick up new deploys.
+		w.Header().Set("Cache-Control", "no-cache")
 		r.URL.Path = "/"
 		fileServer.ServeHTTP(w, r)
 	})
+}
+
+// setCacheHeaders sets Cache-Control based on whether the asset is
+// content-hashed (immutable) or not. Vite produces hashed filenames in
+// /assets/ — these never change and can be cached indefinitely. index.html
+// and other non-hashed files must revalidate to pick up new deploys.
+func setCacheHeaders(w http.ResponseWriter, path string) {
+	if strings.HasPrefix(path, "/assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-cache")
+	}
 }
 
 // spaFallback returns a handler that serves the API and shows a "not built"
