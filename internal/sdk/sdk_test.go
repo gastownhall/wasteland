@@ -798,6 +798,10 @@ func TestBrowse_PendingClaimedBy_Single(t *testing.T) {
 			if item.ClaimedBy != "charlie (pending)" {
 				t.Errorf("w-1: expected ClaimedBy='charlie (pending)', got %q", item.ClaimedBy)
 			}
+			// Status should be promoted from "open" to "claimed" to match the pending claim.
+			if item.Status != "claimed" {
+				t.Errorf("w-1: expected Status='claimed', got %q", item.Status)
+			}
 		case "w-2":
 			// Already claimed on main — should not be overwritten.
 			if item.ClaimedBy != "bob" {

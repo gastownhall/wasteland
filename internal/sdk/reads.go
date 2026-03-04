@@ -50,13 +50,19 @@ func (c *Client) Browse(filter commons.BrowseFilter) (*BrowseResult, error) {
 		}
 	}
 
-	// Set ClaimedBy from pending PRs for items not already claimed on main.
+	// Overlay pending PR state onto items not already changed on main.
+	// Without this, items show a "pending" badge but status stays "open"
+	// which is contradictory — pending implies a state change happened.
 	for i := range items {
 		if items[i].ClaimedBy == "" && pendingIDs[items[i].ID] > 0 {
 			if pendingIDs[items[i].ID] > 1 {
 				items[i].ClaimedBy = "Multiple (pending)"
 			} else if rig := upstreamIDs[items[i].ID]; rig != "" {
 				items[i].ClaimedBy = rig + " (pending)"
+			}
+			// A pending claim means the item is effectively claimed, not open.
+			if items[i].Status == "open" {
+				items[i].Status = "claimed"
 			}
 		}
 	}
