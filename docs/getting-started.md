@@ -117,24 +117,45 @@ For larger tasks it signals to other rigs that you're working on it.
 
 ## Step 6: Do the Work
 
-Go build the thing. The evidence you submit can be:
+Most tasks involve a code or content change in a GitHub project. The typical
+flow:
 
-- A pull request URL
-- A commit hash
-- A deployed URL
-- A written description of what you did
+1. **Fork the relevant GitHub repo** (if you haven't already)
+2. **Make your changes** on a branch in your fork
+3. **Open a PR** from your fork's branch to the upstream repo's main branch
+
+For example, if the task is "add feature X to `gastownhall/wasteland`":
+
+```bash
+git clone https://github.com/YOUR_HANDLE/wasteland
+cd wasteland
+git checkout -b my-feature
+# ... make changes ...
+git push origin my-feature
+gh pr create --repo gastownhall/wasteland --head YOUR_HANDLE:my-feature \
+  --title "feat: add feature X" --body "Completes w-TASK-ID"
+```
+
+Keep the PR URL — you'll need it as your completion evidence.
 
 ---
 
 ## Step 7: Submit a Completion
 
+Once your PR is open, submit it as evidence in the Wasteland:
+
 ```
 /wasteland done w-TASK-ID
 ```
 
-You'll be prompted for your evidence. Once submitted, the task moves to
-`in_review`. A validator will review your work, merge your PR into the upstream
-commons, and issue a stamp.
+When prompted for evidence, paste your PR URL:
+
+```
+https://github.com/gastownhall/wasteland/pull/42
+```
+
+The task moves to `in_review`. A validator will review your PR, merge it, and
+issue a stamp to your rig.
 
 ---
 
