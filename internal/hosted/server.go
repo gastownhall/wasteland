@@ -42,10 +42,8 @@ func (s *Server) Handler(apiServer *api.Server, assets fs.FS) http.Handler {
 	generalRL := api.RateLimit(api.NewRateLimiter(120, 120, time.Minute))
 
 	// Health check for Railway / load balancers (no rate limit).
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
+	// Pings DoltHub SQL API to verify upstream reachability.
+	mux.HandleFunc("GET /healthz", healthHandler())
 
 	// Auth endpoints (no auth middleware required, strict rate limit).
 	mux.Handle("POST /api/auth/connect", authRL(http.HandlerFunc(s.handleConnect)))
@@ -426,6 +424,38 @@ var errNotAuthenticated = &authError{"not authenticated"}
 type authError struct{ msg string }
 
 func (e *authError) Error() string { return e.msg }
+
+// healthHandler returns an HTTP handler that checks DoltHub API reachability.
+// A GET to /healthz returns 200 with {"status":"ok","dolthub":"ok"} when
+// DoltHub responds, or 200 with {"status":"ok","dolthub":"unreachable"} when it
+// doesn't (the process is healthy even if upstream is degraded — Railway should
+// not restart us for an upstream outage).
+func healthHandler() http.HandlerFunc {
+	client := &http.Client{Timeout: 3 * time.Second}
+	const probe = "https://www.dolthub.com/api/v1alpha1/hop/wl-commons/main?q=SELECT%201"
+
+	return func(w http.ResponseWriter, _ *http.Request) {
+		dolthub := "ok"
+		resp, err := client.Get(probe)
+		if err != nil {
+			dolthub = "unreachable"
+			slog.Warn("healthz: DoltHub probe failed", "error", err)
+		} else {
+			_ = resp.Body.Close()
+			if resp.StatusCode >= 500 {
+				dolthub = "degraded"
+				slog.Warn("healthz: DoltHub probe returned error", "status", resp.StatusCode)
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status":  "ok",
+			"dolthub": dolthub,
+		})
+	}
+}
 
 // writeJSON writes a JSON response (duplicated here to avoid circular import
 // with the api package, which provides the canonical version).

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,8 +10,10 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/julianknutsen/wasteland/internal/api"
@@ -54,6 +57,30 @@ func resolvePort(cmd *cobra.Command) int {
 		}
 	}
 	return port
+}
+
+// listenAndServeGraceful starts the server and shuts down gracefully on
+// SIGINT/SIGTERM, giving in-flight requests up to 10 seconds to complete.
+func listenAndServeGraceful(srv *http.Server) error {
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case err := <-errCh:
+		return err
+	case sig := <-quit:
+		slog.Info("shutting down", "signal", sig.String())
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			return fmt.Errorf("graceful shutdown failed: %w", err)
+		}
+		slog.Info("server stopped")
+		return nil
+	}
 }
 
 func runServe(cmd *cobra.Command, stdout, stderr io.Writer) error {
@@ -190,7 +217,7 @@ func runServe(cmd *cobra.Command, stdout, stderr io.Writer) error {
 	addr := fmt.Sprintf(":%d", port)
 	slog.Info("server started", "mode", "self-sovereign", "addr", addr)
 	srv := &http.Server{Addr: addr, Handler: handler, MaxHeaderBytes: 1 << 20} //nolint:gosec // bind addr is user-controlled via --port flag
-	return srv.ListenAndServe()
+	return listenAndServeGraceful(srv)
 }
 
 func runServeHosted(cmd *cobra.Command, stdout, _ io.Writer) error {
@@ -275,7 +302,7 @@ func runServeHosted(cmd *cobra.Command, stdout, _ io.Writer) error {
 	slog.Info("server started", "mode", "hosted", "addr", addr)
 	slog.Info("nango configured", "integration_id", nangoClient.IntegrationID())
 	srv := &http.Server{Addr: addr, Handler: handler, MaxHeaderBytes: 1 << 20} //nolint:gosec // bind addr is user-controlled via --port flag
-	return srv.ListenAndServe()
+	return listenAndServeGraceful(srv)
 }
 
 // newDetailRefresh returns a refresh callback for the scoreboard detail cache.
