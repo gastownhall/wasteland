@@ -5,7 +5,9 @@ import type { BrowseResponse } from "./types";
 let prefetchPromise: Promise<BrowseResponse> | null = null;
 
 // Only prefetch for the root path with no query params (default browse).
-if (typeof window !== "undefined" && window.location.pathname === "/" && !window.location.search) {
+// Skip in test environments where fetch is mocked after module load.
+const isTest = import.meta.env.MODE === "test";
+if (!isTest && typeof window !== "undefined" && window.location.pathname === "/" && !window.location.search) {
   prefetchPromise = fetch("/api/wanted")
     .then((r) => {
       if (!r.ok) throw new Error(r.statusText);

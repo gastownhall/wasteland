@@ -31,12 +31,10 @@ export function BrowseList() {
     try {
       // On first load with default filters, use prefetched data if available.
       const prefetched = !hasLoadedRef.current ? consumePrefetch() : null;
-      const resp = prefetched ? await prefetched : await browse(filter);
-      if (resp) {
-        setItems(resp.items);
-        setSelectedIndex(-1);
-        hasLoadedRef.current = true;
-      }
+      const resp = (prefetched && (await prefetched)) || (await browse(filter));
+      setItems(resp.items);
+      setSelectedIndex(-1);
+      hasLoadedRef.current = true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to load";
       setError(msg);
