@@ -21,7 +21,7 @@ func TestSecurityHeaders(t *testing.T) {
 		header string
 		want   string
 	}{
-		{"Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://api.nango.dev; img-src 'self' data:"},
+		{"Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://api.nango.dev https://*.ingest.us.sentry.io; img-src 'self' data:"},
 		{"X-Frame-Options", "DENY"},
 		{"X-Content-Type-Options", "nosniff"},
 		{"Referrer-Policy", "strict-origin-when-cross-origin"},
