@@ -78,7 +78,9 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 		// No stale data — return a 503 with a clear outage message.
 		msg := "Upstream database is temporarily unavailable — please try again in a moment."
 		slog.Error("browse failed with no stale data", "error", err)
-		sentry.CaptureException(err)
+		if !isTransientUpstreamError(err) {
+			sentry.CaptureException(err)
+		}
 		writeJSON(w, http.StatusServiceUnavailable, ErrorResponse{Error: msg})
 		return
 	}
@@ -125,7 +127,9 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 		}
 		msg := "Upstream database is temporarily unavailable — please try again in a moment."
 		slog.Error("detail failed with no stale data", "error", err)
-		sentry.CaptureException(err)
+		if !isTransientUpstreamError(err) {
+			sentry.CaptureException(err)
+		}
 		writeJSON(w, http.StatusServiceUnavailable, ErrorResponse{Error: msg})
 		return
 	}
@@ -243,6 +247,13 @@ func isUpstreamAuthError(err error) bool {
 	return strings.Contains(err.Error(), "invalid authorization")
 }
 
+// isTransientUpstreamError returns true if the error is a known-transient
+// DoltHub condition that doesn't warrant a Sentry alert (e.g. "no such
+// repository" when DoltHub temporarily can't resolve a repo).
+func isTransientUpstreamError(err error) bool {
+	return strings.Contains(err.Error(), "no such repository")
+}
+
 // writeUpstreamError classifies DoltHub errors and writes an appropriate response:
 //   - "invalid authorization" → 401 (triggers frontend re-auth)
 //   - other upstream errors → 503 with sanitized message + Sentry capture
@@ -252,7 +263,9 @@ func writeUpstreamError(w http.ResponseWriter, err error, label string) {
 		return
 	}
 	slog.Error(label+" failed", "error", err)
-	sentry.CaptureException(err)
+	if !isTransientUpstreamError(err) {
+		sentry.CaptureException(err)
+	}
 	writeError(w, http.StatusServiceUnavailable,
 		"Upstream database is temporarily unavailable — please try again in a moment.")
 }
