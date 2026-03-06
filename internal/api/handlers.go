@@ -52,6 +52,11 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 		return json.Marshal(toBrowseResponse(result))
 	})
 	if err != nil {
+		// Auth errors should not serve stale data — the user needs to reconnect.
+		if isUpstreamAuthError(err) {
+			writeError(w, http.StatusUnauthorized, "DoltHub credentials expired — please reconnect.")
+			return
+		}
 		// Try to serve stale cache data with a warning instead of a hard error.
 		stale := s.browseCache.GetStale(key)
 		if stale != nil {
@@ -102,6 +107,11 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		// Auth errors should not serve stale data — the user needs to reconnect.
+		if isUpstreamAuthError(err) {
+			writeError(w, http.StatusUnauthorized, "DoltHub credentials expired — please reconnect.")
 			return
 		}
 		// Try stale cache before returning a hard error.
@@ -227,12 +237,17 @@ func (s *Server) invalidateAllCaches() {
 	s.detailCache.Invalidate()
 }
 
+// isUpstreamAuthError returns true if the error is a DoltHub authentication
+// failure (expired or invalid API key).
+func isUpstreamAuthError(err error) bool {
+	return strings.Contains(err.Error(), "invalid authorization")
+}
+
 // writeUpstreamError classifies DoltHub errors and writes an appropriate response:
 //   - "invalid authorization" → 401 (triggers frontend re-auth)
 //   - other upstream errors → 503 with sanitized message + Sentry capture
 func writeUpstreamError(w http.ResponseWriter, err error, label string) {
-	msg := err.Error()
-	if strings.Contains(msg, "invalid authorization") {
+	if isUpstreamAuthError(err) {
 		writeError(w, http.StatusUnauthorized, "DoltHub credentials expired — please reconnect.")
 		return
 	}

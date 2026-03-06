@@ -60,6 +60,17 @@
   line-height: 1.5;
 }
 
+.errorHint {
+  color: var(--red);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-3);
+  line-height: 1.5;
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red) 25%, transparent);
+  border-radius: var(--radius-sm);
+}
+
 .actions {
   display: flex;
   gap: var(--space-2);

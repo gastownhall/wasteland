@@ -2,9 +2,12 @@ package hosted
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gastownhall/wasteland/internal/api"
@@ -106,6 +109,15 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	if err != nil || meta == nil {
 		meta = &UserMetadata{RigHandle: req.RigHandle}
 	}
+
+	// Verify the DoltHub API key works before proceeding.
+	if err := ProbeDoltHubToken(apiKey); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "DoltHub API key is invalid — please reconnect your DoltHub account. Verify you created an API token (not a credential) in DoltHub.",
+		})
+		return
+	}
+
 	meta.RigHandle = req.RigHandle
 	meta.UpsertWasteland(WastelandConfig{
 		Upstream: req.Upstream,
@@ -309,6 +321,14 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Verify the DoltHub API key still works before joining.
+	if err := ProbeDoltHubToken(apiKey); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "DoltHub API key is invalid — please reconnect your DoltHub account. Verify you created an API token (not a credential) in DoltHub.",
+		})
+		return
+	}
+
 	meta.UpsertWasteland(WastelandConfig{
 		Upstream: req.Upstream,
 		ForkOrg:  req.ForkOrg,
@@ -463,6 +483,36 @@ func healthHandler() http.HandlerFunc {
 			"dolthub": dolthub,
 		})
 	}
+}
+
+// ProbeDoltHubToken verifies a DoltHub API key by running a lightweight query.
+// Returns nil if the key is valid (or empty), error if DoltHub rejects it.
+// Var so tests can override.
+var ProbeDoltHubToken = func(apiKey string) error {
+	if apiKey == "" {
+		return nil
+	}
+	req, err := http.NewRequest("GET",
+		"https://www.dolthub.com/api/v1alpha1/hop/wl-commons/main?q=SELECT%201", nil)
+	if err != nil {
+		return nil // don't block connect for request construction errors
+	}
+	req.Header.Set("authorization", "token "+apiKey)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil // network error — don't block connect for transient issues
+	}
+	defer resp.Body.Close() //nolint:errcheck // best-effort close
+
+	if resp.StatusCode == http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		if strings.Contains(string(body), "invalid authorization") {
+			return fmt.Errorf("DoltHub rejected the API key")
+		}
+	}
+	return nil
 }
 
 // writeJSON writes a JSON response (duplicated here to avoid circular import

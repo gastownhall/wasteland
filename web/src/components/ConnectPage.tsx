@@ -14,6 +14,7 @@ export function ConnectPage() {
 
   const rawReturnTo = searchParams.get("return_to");
   const returnTo = rawReturnTo && /^\/[^/]/.test(rawReturnTo) ? rawReturnTo : null;
+  const reason = searchParams.get("reason");
   const [view, setView] = useState<"connect" | "join">("connect");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -129,7 +130,22 @@ export function ConnectPage() {
 
   return (
     <div className={styles.page}>
-      {returnTo && <p className={styles.hint}>Sign in to continue.</p>}
+      {reason === "expired" && (
+        <p className={styles.errorHint}>
+          Your DoltHub API token has expired or is invalid. Please reconnect. Make sure you create an API{" "}
+          <strong>token</strong> (not a credential) at{" "}
+          <a
+            href="https://www.dolthub.com/settings/tokens"
+            target="_blank"
+            rel="noopener noreferrer"
+            className={styles.link}
+          >
+            dolthub.com/settings/tokens
+          </a>
+          .
+        </p>
+      )}
+      {returnTo && !reason && <p className={styles.hint}>Sign in to continue.</p>}
       <h2 className={styles.heading}>{view === "join" ? "Join a Wasteland" : "Connect to Wasteland"}</h2>
 
       {view === "join" && (
