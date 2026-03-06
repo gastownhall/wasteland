@@ -620,31 +620,37 @@ func (d *DoltHubProvider) ListPendingWantedIDs(upstreamOrg, db string) (map[stri
 		}
 	}
 
-	// Fetch upstream main state. Used as baseline for PRs from "main"
-	// (where dolt_diff is a no-op) and to filter stale fork diffs where a
-	// branch was created before upstream moved an item forward.
+	// For PRs from "main" (commits directly on the fork's main), dolt_diff
+	// between main and main is a no-op. Fall back to snapshot comparison
+	// against upstream main for those PRs.
 	type wantedItem struct {
 		status    string
 		claimedBy string
 	}
-	upstreamItems := make(map[string]wantedItem)
 	snapshotQuery := "SELECT id, status, COALESCE(claimed_by, '') as claimed_by FROM wanted"
-	upstreamURL := fmt.Sprintf("%s/%s/%s/main?q=%s",
-		dolthubAPIBase, upstreamOrg, db, url.QueryEscape(snapshotQuery))
-	if body, err := d.dolthubGet(upstreamURL); err == nil {
-		var qr queryResponse
-		if json.Unmarshal(body, &qr) == nil {
-			for _, row := range qr.Rows {
-				upstreamItems[row["id"]] = wantedItem{
-					status:    row["status"],
-					claimedBy: row["claimed_by"],
+	var upstreamItems map[string]wantedItem
+	needsUpstream := false
+	for _, pr := range prs {
+		if pr.fromBranch == "main" {
+			needsUpstream = true
+			break
+		}
+	}
+	if needsUpstream {
+		upstreamItems = make(map[string]wantedItem)
+		upstreamURL := fmt.Sprintf("%s/%s/%s/main?q=%s",
+			dolthubAPIBase, upstreamOrg, db, url.QueryEscape(snapshotQuery))
+		if body, err := d.dolthubGet(upstreamURL); err == nil {
+			var qr queryResponse
+			if json.Unmarshal(body, &qr) == nil {
+				for _, row := range qr.Rows {
+					upstreamItems[row["id"]] = wantedItem{
+						status:    row["status"],
+						claimedBy: row["claimed_by"],
+					}
 				}
 			}
 		}
-	}
-	// stateRank orders wanted lifecycle states; higher = further along.
-	stateRank := map[string]int{
-		"open": 0, "claimed": 1, "in_review": 2, "completed": 3, "done": 3,
 	}
 
 	// Query each PR's fork branch in parallel using dolt_diff to find rows
@@ -655,6 +661,7 @@ func (d *DoltHubProvider) ListPendingWantedIDs(upstreamOrg, db string) (map[stri
 	type pendingEntry struct {
 		wantedID string
 		state    PendingWantedState
+		author   string // PR author, for filtering inherited claims
 	}
 	diffCh := make(chan []pendingEntry, len(prs))
 	var wg sync.WaitGroup
@@ -709,6 +716,7 @@ func (d *DoltHubProvider) ListPendingWantedIDs(upstreamOrg, db string) (map[stri
 						}
 						entries = append(entries, pendingEntry{
 							wantedID: id,
+							author:   pr.author,
 							state: PendingWantedState{
 								RigHandle: rigHandle,
 								Status:    forkStatus,
@@ -759,6 +767,7 @@ func (d *DoltHubProvider) ListPendingWantedIDs(upstreamOrg, db string) (map[stri
 				}
 				entries = append(entries, pendingEntry{
 					wantedID: id,
+					author:   pr.author,
 					state: PendingWantedState{
 						RigHandle: rigHandle,
 						Status:    forkStatus,
@@ -779,13 +788,19 @@ func (d *DoltHubProvider) ListPendingWantedIDs(upstreamOrg, db string) (map[stri
 	ids := make(map[string][]PendingWantedState)
 	for entries := range diffCh {
 		for _, e := range entries {
-			// Filter stale diffs: if the fork's status for this item is behind
-			// upstream main, the fork never intentionally progressed it — the
-			// diff is just because the branch predates an upstream update.
-			if up, ok := upstreamItems[e.wantedID]; ok {
-				if stateRank[e.state.Status] < stateRank[up.status] {
-					continue
-				}
+			// Skip stale fork state that doesn't represent intentional action.
+			// A diff appears when a branch predates an upstream update — the
+			// branch carries forward old state the fork owner never touched.
+			//
+			// Filter rules:
+			// 1. status "open" = untouched item (stale copy)
+			// 2. claimed_by set to someone other than the PR author =
+			//    inherited claim from a previous upstream state
+			if e.state.Status == "open" {
+				continue
+			}
+			if e.state.ClaimedBy != "" && e.state.ClaimedBy != e.author {
+				continue
 			}
 			ids[e.wantedID] = append(ids[e.wantedID], e.state)
 		}

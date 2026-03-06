@@ -697,6 +697,105 @@ func TestDoltHubProvider_ListPendingWantedIDs_CompletionQueryFails_GracefulDegra
 	}
 }
 
+func TestDoltHubProvider_ListPendingWantedIDs_StaleEntriesFiltered(t *testing.T) {
+	// Stale fork state should be filtered:
+	// 1. status "open" = untouched item
+	// 2. claimed_by someone other than PR author = inherited claim
+	// Only intentional actions (claimed_by == author) pass through.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/org/db/pulls", func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/pulls/") {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"pulls": []map[string]any{
+				{"pull_id": "1", "state": "open"},
+				{"pull_id": "2", "state": "open"},
+				{"pull_id": "3", "state": "open"},
+			},
+		})
+	})
+	mux.HandleFunc("/org/db/pulls/1", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"from_branch":       "wl/register/stale-user",
+			"from_branch_owner": "stale-fork",
+			"author":            "stale-user",
+		})
+	})
+	mux.HandleFunc("/org/db/pulls/2", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"from_branch":       "wl/bob/w-001",
+			"from_branch_owner": "bob-fork",
+			"author":            "bob",
+		})
+	})
+	mux.HandleFunc("/org/db/pulls/3", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"from_branch":       "wl/register/charlie",
+			"from_branch_owner": "charlie-fork",
+			"author":            "charlie",
+		})
+	})
+	// stale-user: dolt_diff shows w-001 at "open" (stale untouched).
+	mux.HandleFunc("/stale-fork/db/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"rows": []map[string]string{
+				{"id": "w-001", "status": "open", "claimed_by": "", "diff_type": "modified"},
+			},
+		})
+	})
+	// bob: dolt_diff shows w-001 at "claimed" by bob (intentional action).
+	mux.HandleFunc("/bob-fork/db/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"rows": []map[string]string{
+				{"id": "w-001", "status": "claimed", "claimed_by": "bob", "diff_type": "modified"},
+			},
+		})
+	})
+	// charlie: dolt_diff shows w-001 at "claimed" by alice (inherited, not charlie's).
+	mux.HandleFunc("/charlie-fork/db/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"rows": []map[string]string{
+				{"id": "w-001", "status": "claimed", "claimed_by": "alice", "diff_type": "modified"},
+			},
+		})
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	dolthubAPIBase = server.URL
+	dolthubRepoBase = server.URL + "/repositories"
+
+	provider := NewDoltHubProvider("token")
+	ids, err := provider.ListPendingWantedIDs("org", "db")
+	if err != nil {
+		t.Fatalf("ListPendingWantedIDs() error: %v", err)
+	}
+	// Only bob's "claimed" entry should appear:
+	// - stale-user filtered (status "open")
+	// - charlie filtered (claimed_by "alice" != author "charlie")
+	if len(ids) != 1 {
+		t.Fatalf("expected 1 pending ID (stale filtered), got %d: %v", len(ids), ids)
+	}
+	pending := ids["w-001"]
+	if len(pending) != 1 {
+		t.Fatalf("expected 1 entry for w-001, got %d", len(pending))
+	}
+	if pending[0].RigHandle != "bob" {
+		t.Errorf("expected rig_handle=bob, got %s", pending[0].RigHandle)
+	}
+	if pending[0].Status != "claimed" {
+		t.Errorf("expected status=claimed, got %s", pending[0].Status)
+	}
+}
+
 func TestDoltHubProvider_ListPendingWantedIDs_NoDiffs(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/org/db/pulls", func(w http.ResponseWriter, r *http.Request) {
