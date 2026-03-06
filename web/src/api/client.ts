@@ -21,9 +21,19 @@ import type {
   UpdateInput,
 } from "./types";
 
-// --- Active upstream tracking ---
+// --- Active upstream tracking (seeded from localStorage to avoid race with context) ---
 
-let _activeUpstream: string | null = null;
+const UPSTREAM_KEY = "wl_active";
+
+function loadActiveUpstream(): string | null {
+  try {
+    return localStorage.getItem(UPSTREAM_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+let _activeUpstream: string | null = loadActiveUpstream();
 
 export function setActiveUpstream(upstream: string | null) {
   _activeUpstream = upstream;
