@@ -100,8 +100,10 @@ $(GOLANGCI_LINT):
 	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | \
 		sh -s -- -b $(BIN_DIR) v$(GOLANGCI_LINT_VERSION)
 
-## setup: install tools and git hooks
+## setup: install tools, web deps, and git hooks
 setup: install-tools
+	@command -v bun >/dev/null 2>&1 || { echo "Installing bun..."; curl -fsSL https://bun.sh/install | bash; }
+	cd web && bun install
 	ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
 	@echo "Done. Tools installed, pre-commit hook active."
 
