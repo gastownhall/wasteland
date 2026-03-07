@@ -1,6 +1,6 @@
 module github.com/gastownhall/wasteland
 
-go 1.24.13
+go 1.26.1
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0
