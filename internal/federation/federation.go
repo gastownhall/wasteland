@@ -63,7 +63,7 @@ type Config struct {
 	// JoinedAt is when the rig joined the wasteland.
 	JoinedAt time.Time `json:"joined_at"`
 
-	// Mode is the workflow mode: "" or "wild-west" (default) or "pr".
+	// Mode is the workflow mode: "" or "pr" (default) or "wild-west".
 	Mode string `json:"mode,omitempty"`
 
 	// Backend is the database backend: "remote" (DoltHub API, default) or "local" (dolt CLI).
@@ -81,10 +81,10 @@ type Config struct {
 	GitHubRepo string `json:"github_repo,omitempty"`
 }
 
-// ResolveMode returns the effective mode, defaulting to wild-west.
+// ResolveMode returns the effective mode, defaulting to PR mode.
 func (c *Config) ResolveMode() string {
-	if c.Mode == "" || c.Mode == ModeWildWest {
-		return ModeWildWest
+	if c.Mode == "" || c.Mode == ModePR {
+		return ModePR
 	}
 	return c.Mode
 }
@@ -318,6 +318,7 @@ func (s *Service) Join(upstream, forkOrg, handle, displayName, ownerEmail, versi
 		ForkDB:       upstreamDB,
 		LocalDir:     localDir,
 		Backend:      BackendLocal,
+		Mode:         ModePR,
 		RigHandle:    handle,
 		HopURI:       hopURI,
 		JoinedAt:     time.Now(),
@@ -412,6 +413,7 @@ func (s *Service) Create(opts CreateOptions) (*CreateResult, error) {
 		ForkDB:    db,
 		LocalDir:  localDir,
 		Backend:   BackendLocal,
+		Mode:      ModePR,
 		RigHandle: opts.Handle,
 		HopURI:    hopURI,
 		JoinedAt:  time.Now(),

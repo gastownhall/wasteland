@@ -312,6 +312,27 @@ func TestResolveProviderType(t *testing.T) {
 	}
 }
 
+func TestResolveMode(t *testing.T) {
+	tests := []struct {
+		name string
+		mode string
+		want string
+	}{
+		{"empty defaults to pr", "", ModePR},
+		{"explicit pr", ModePR, ModePR},
+		{"explicit wild-west", ModeWildWest, ModeWildWest},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{Mode: tc.mode}
+			got := cfg.ResolveMode()
+			if got != tc.want {
+				t.Errorf("ResolveMode() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestResolveBackend(t *testing.T) {
 	tests := []struct {
 		name     string

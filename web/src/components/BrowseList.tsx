@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { browse } from "../api/client";
@@ -23,8 +23,14 @@ export function BrowseList() {
   const [showForm, setShowForm] = useState(false);
   const [showInferForm, setShowInferForm] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
+  const selectedIndexRef = useRef(-1);
   const searchRef = useRef<HTMLInputElement>(null);
   const hasLoadedRef = useRef(false);
+
+  const setSelection = useCallback((next: number) => {
+    selectedIndexRef.current = next;
+    setSelectedIndex(next);
+  }, []);
 
   const load = useCallback(async () => {
     if (!hasLoadedRef.current) setLoading(true);
@@ -36,7 +42,7 @@ export function BrowseList() {
       const resp = (prefetched && (await prefetched)) || (await browse(filter));
       setItems(resp.items);
       if (resp.warning) setWarning(resp.warning);
-      setSelectedIndex(-1);
+      setSelection(-1);
       hasLoadedRef.current = true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to load";
@@ -45,7 +51,7 @@ export function BrowseList() {
     } finally {
       setLoading(false);
     }
-  }, [filter]);
+  }, [filter, setSelection]);
 
   useEffect(() => {
     load();
@@ -72,19 +78,25 @@ export function BrowseList() {
       if (inInput) return;
 
       switch (e.key) {
-        case "j":
+        case "j": {
           e.preventDefault();
-          setSelectedIndex((i) => Math.min(i + 1, items.length - 1));
+          if (items.length === 0) break;
+          setSelection(Math.min(selectedIndexRef.current + 1, items.length - 1));
           break;
-        case "k":
+        }
+        case "k": {
           e.preventDefault();
-          setSelectedIndex((i) => Math.max(i - 1, 0));
+          if (items.length === 0) break;
+          setSelection(Math.max(selectedIndexRef.current - 1, 0));
           break;
-        case "Enter":
-          if (selectedIndex >= 0 && selectedIndex < items.length) {
-            navigate(`/wanted/${items[selectedIndex].id}`);
+        }
+        case "Enter": {
+          const index = selectedIndexRef.current;
+          if (index >= 0 && index < items.length) {
+            startTransition(() => navigate(`/wanted/${items[index].id}`));
           }
           break;
+        }
         case "c":
           setShowForm(true);
           break;
@@ -100,7 +112,7 @@ export function BrowseList() {
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [items, selectedIndex, navigate]);
+  }, [items, navigate, setSelection]);
 
   return (
     <div className={styles.page}>

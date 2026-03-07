@@ -27,6 +27,11 @@ func joinedEnv(t *testing.T, backend backendKind) *testEnv {
 	return env
 }
 
+func joinedLifecycleEnv(t *testing.T, backend backendKind) *testEnv {
+	t.Helper()
+	return joinedEnvInMode(t, backend, "wild-west")
+}
+
 // forkCloneDir returns the fork clone dir from the wasteland config.
 func forkCloneDir(t *testing.T, env *testEnv) string {
 	t.Helper()
@@ -146,7 +151,7 @@ func TestSchemaInit(t *testing.T) {
 func TestPostWanted(t *testing.T) {
 	for _, backend := range backends {
 		t.Run(string(backend), func(t *testing.T) {
-			env := joinedEnv(t, backend)
+			env := joinedLifecycleEnv(t, backend)
 			dbDir := forkCloneDir(t, env)
 
 			stdout, stderr, err := runWL(t, env, "post",
@@ -200,7 +205,7 @@ func TestPostWanted(t *testing.T) {
 func TestClaimWanted(t *testing.T) {
 	for _, backend := range backends {
 		t.Run(string(backend), func(t *testing.T) {
-			env := joinedEnv(t, backend)
+			env := joinedLifecycleEnv(t, backend)
 			dbDir := forkCloneDir(t, env)
 
 			// Post an item first.
@@ -235,7 +240,7 @@ func TestClaimWanted(t *testing.T) {
 func TestClaimAlreadyClaimed(t *testing.T) {
 	for _, backend := range backends {
 		t.Run(string(backend), func(t *testing.T) {
-			env := joinedEnv(t, backend)
+			env := joinedLifecycleEnv(t, backend)
 			dbDir := forkCloneDir(t, env)
 
 			// Post and claim.
@@ -269,7 +274,7 @@ func TestClaimAlreadyClaimed(t *testing.T) {
 func TestDoneFullLifecycle(t *testing.T) {
 	for _, backend := range backends {
 		t.Run(string(backend), func(t *testing.T) {
-			env := joinedEnv(t, backend)
+			env := joinedLifecycleEnv(t, backend)
 			dbDir := forkCloneDir(t, env)
 
 			// Post.
@@ -317,7 +322,7 @@ func TestDoneFullLifecycle(t *testing.T) {
 func TestDoneWrongClaimer(t *testing.T) {
 	for _, backend := range backends {
 		t.Run(string(backend), func(t *testing.T) {
-			env := joinedEnv(t, backend)
+			env := joinedLifecycleEnv(t, backend)
 			dbDir := forkCloneDir(t, env)
 
 			// Post and claim as the default rig (forkOrg handle).
@@ -354,7 +359,7 @@ func TestDoneWrongClaimer(t *testing.T) {
 func TestDoneUnclaimed(t *testing.T) {
 	for _, backend := range backends {
 		t.Run(string(backend), func(t *testing.T) {
-			env := joinedEnv(t, backend)
+			env := joinedLifecycleEnv(t, backend)
 			dbDir := forkCloneDir(t, env)
 
 			// Post but don't claim.
@@ -387,7 +392,7 @@ func TestDoneUnclaimed(t *testing.T) {
 func TestPostOutput(t *testing.T) {
 	for _, backend := range backends {
 		t.Run(string(backend), func(t *testing.T) {
-			env := joinedEnv(t, backend)
+			env := joinedLifecycleEnv(t, backend)
 
 			stdout, _, err := runWL(t, env, "post", "--title", "Output format test", "--type", "docs", "--no-push")
 			if err != nil {
@@ -410,7 +415,7 @@ func TestPostOutput(t *testing.T) {
 func TestAcceptFullLifecycle(t *testing.T) {
 	for _, backend := range backends {
 		t.Run(string(backend), func(t *testing.T) {
-			env := joinedEnv(t, backend)
+			env := joinedLifecycleEnv(t, backend)
 			dbDir := forkCloneDir(t, env)
 
 			// Post as forkOrg (poster).
@@ -487,7 +492,7 @@ func TestAcceptFullLifecycle(t *testing.T) {
 func TestAcceptSelfReject(t *testing.T) {
 	for _, backend := range backends {
 		t.Run(string(backend), func(t *testing.T) {
-			env := joinedEnv(t, backend)
+			env := joinedLifecycleEnv(t, backend)
 
 			// Post → claim → done as forkOrg.
 			stdout, _, err := runWL(t, env, "post", "--title", "Self accept test", "--type", "bug", "--no-push")
@@ -518,7 +523,7 @@ func TestAcceptSelfReject(t *testing.T) {
 func TestRejectFullLifecycle(t *testing.T) {
 	for _, backend := range backends {
 		t.Run(string(backend), func(t *testing.T) {
-			env := joinedEnv(t, backend)
+			env := joinedLifecycleEnv(t, backend)
 			dbDir := forkCloneDir(t, env)
 
 			// Post as forkOrg (poster).
@@ -602,7 +607,7 @@ func TestRejectFullLifecycle(t *testing.T) {
 func TestUpdateWanted(t *testing.T) {
 	for _, backend := range backends {
 		t.Run(string(backend), func(t *testing.T) {
-			env := joinedEnv(t, backend)
+			env := joinedLifecycleEnv(t, backend)
 			dbDir := forkCloneDir(t, env)
 
 			// Post.
@@ -643,7 +648,7 @@ func TestUpdateWanted(t *testing.T) {
 func TestUpdateClaimedFails(t *testing.T) {
 	for _, backend := range backends {
 		t.Run(string(backend), func(t *testing.T) {
-			env := joinedEnv(t, backend)
+			env := joinedLifecycleEnv(t, backend)
 
 			// Post and claim.
 			stdout, _, err := runWL(t, env, "post", "--title", "Claimed update test", "--type", "bug", "--no-push")
@@ -669,7 +674,7 @@ func TestUpdateClaimedFails(t *testing.T) {
 func TestUnclaimWanted(t *testing.T) {
 	for _, backend := range backends {
 		t.Run(string(backend), func(t *testing.T) {
-			env := joinedEnv(t, backend)
+			env := joinedLifecycleEnv(t, backend)
 			dbDir := forkCloneDir(t, env)
 
 			// Post an item.
@@ -713,7 +718,7 @@ func TestUnclaimWanted(t *testing.T) {
 func TestUnclaimByPoster(t *testing.T) {
 	for _, backend := range backends {
 		t.Run(string(backend), func(t *testing.T) {
-			env := joinedEnv(t, backend)
+			env := joinedLifecycleEnv(t, backend)
 			dbDir := forkCloneDir(t, env)
 
 			// Post as forkOrg (poster).
@@ -761,7 +766,7 @@ func TestUnclaimByPoster(t *testing.T) {
 func TestDeleteWanted(t *testing.T) {
 	for _, backend := range backends {
 		t.Run(string(backend), func(t *testing.T) {
-			env := joinedEnv(t, backend)
+			env := joinedLifecycleEnv(t, backend)
 			dbDir := forkCloneDir(t, env)
 
 			// Post.
@@ -793,7 +798,7 @@ func TestDeleteWanted(t *testing.T) {
 func TestDeleteClaimedFails(t *testing.T) {
 	for _, backend := range backends {
 		t.Run(string(backend), func(t *testing.T) {
-			env := joinedEnv(t, backend)
+			env := joinedLifecycleEnv(t, backend)
 
 			// Post and claim.
 			stdout, _, err := runWL(t, env, "post", "--title", "Claimed delete test", "--type", "feature", "--no-push")

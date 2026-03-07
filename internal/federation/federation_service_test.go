@@ -30,6 +30,9 @@ func TestJoin_Success(t *testing.T) {
 	if cfg.RigHandle != "alice-rig" {
 		t.Errorf("RigHandle = %q, want %q", cfg.RigHandle, "alice-rig")
 	}
+	if cfg.Mode != ModePR {
+		t.Errorf("Mode = %q, want %q", cfg.Mode, ModePR)
+	}
 
 	if !provider.Forked["steveyegge/wl-commons->alice-dev"] {
 		t.Error("expected fork to be created")
@@ -321,6 +324,9 @@ func TestCreate_Success(t *testing.T) {
 	}
 	if cfg.ProviderType != "fake" {
 		t.Errorf("ProviderType = %q, want %q", cfg.ProviderType, "fake")
+	}
+	if cfg.Mode != ModePR {
+		t.Errorf("Mode = %q, want %q", cfg.Mode, ModePR)
 	}
 
 	// Verify call ordering: Init → SQLExec → StageAndCommit → RegisterRig → AddRemote → Push

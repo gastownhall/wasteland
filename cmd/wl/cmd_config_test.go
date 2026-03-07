@@ -108,8 +108,8 @@ func TestRunConfigGet_ModeDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runConfigGet(mode) error: %v", err)
 	}
-	if got := strings.TrimSpace(stdout.String()); got != "wild-west" {
-		t.Errorf("runConfigGet(mode default) = %q, want %q", got, "wild-west")
+	if got := strings.TrimSpace(stdout.String()); got != "pr" {
+		t.Errorf("runConfigGet(mode default) = %q, want %q", got, "pr")
 	}
 }
 

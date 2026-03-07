@@ -248,6 +248,14 @@ func (e *testEnv) remoteArgs() []string {
 	}
 }
 
+// joinedEnvInMode creates a joined env and then explicitly sets the workflow mode.
+func joinedEnvInMode(t *testing.T, backend backendKind, mode string) *testEnv {
+	t.Helper()
+	env := joinedEnv(t, backend)
+	setMode(t, env, upstream, mode)
+	return env
+}
+
 // joinWasteland runs "wl join" with the appropriate remote provider as the front door.
 func (e *testEnv) joinWasteland(t *testing.T, upstream, forkOrg string) {
 	t.Helper()
@@ -293,6 +301,24 @@ func runWL(t *testing.T, env *testEnv, args ...string) (string, string, error) {
 
 	err := cmd.Run()
 	return stdout.String(), stderr.String(), err
+}
+
+// setMode updates the wasteland config to the given mode.
+func setMode(t *testing.T, env *testEnv, upstreamPath, mode string) {
+	t.Helper()
+	cfg := env.loadConfig(t, upstreamPath)
+	cfg["mode"] = mode
+
+	parts := strings.SplitN(upstreamPath, "/", 2)
+	configPath := filepath.Join(env.ConfigDir, "wastelands", parts[0], parts[1]+".json")
+
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		t.Fatalf("marshaling config: %v", err)
+	}
+	if err := os.WriteFile(configPath, append(data, '\n'), 0o644); err != nil {
+		t.Fatalf("writing config: %v", err)
+	}
 }
 
 // doltSQL runs a dolt SQL query against a database directory and returns CSV output.

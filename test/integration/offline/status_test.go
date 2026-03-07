@@ -10,7 +10,7 @@ import (
 func TestStatusFullLifecycle(t *testing.T) {
 	for _, backend := range backends {
 		t.Run(string(backend), func(t *testing.T) {
-			env := joinedEnv(t, backend)
+			env := joinedEnvInMode(t, backend, "wild-west")
 
 			// 1. Post as forkOrg → status shows "open" + title.
 			stdout, _, err := runWL(t, env, "post",

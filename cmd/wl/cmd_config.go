@@ -19,7 +19,7 @@ Use 'wl config get <key>' to read a setting.
 Use 'wl config set <key> <value>' to change a setting.
 
 Supported keys:
-  mode            Workflow mode: wild-west (default) or pr
+  mode            Workflow mode: pr (default) or wild-west
   signing         Enable GPG-signed Dolt commits: true or false
   provider-type   Upstream provider type (read-only, set during 'wl join')
   github-repo     (deprecated) Upstream GitHub repo for PR shells`,
