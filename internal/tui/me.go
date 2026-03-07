@@ -116,7 +116,7 @@ func (m meModel) view() string {
 		return b.String()
 	}
 	if m.err != nil {
-		b.WriteString(fmt.Sprintf("  Error: %v", m.err))
+		fmt.Fprintf(&b, "  Error: %v", m.err)
 		return b.String()
 	}
 	if m.data == nil {

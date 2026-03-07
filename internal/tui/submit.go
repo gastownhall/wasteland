@@ -52,11 +52,11 @@ func (m *submitModel) renderContent() string {
 
 	b.WriteString("\n")
 	b.WriteString(styleTitle.Render("  Submit PR") + "\n\n")
-	b.WriteString(fmt.Sprintf("  %s: %s\n", m.item.ID, m.item.Title))
+	fmt.Fprintf(&b, "  %s: %s\n", m.item.ID, m.item.Title)
 
 	delta := commons.DeltaLabel(m.mainStatus, m.item.Status)
-	b.WriteString(fmt.Sprintf("  Transition:  %s → %s (%s)\n", m.mainStatus, m.item.Status, delta))
-	b.WriteString(fmt.Sprintf("  Branch:      %s\n", m.branch))
+	fmt.Fprintf(&b, "  Transition:  %s → %s (%s)\n", m.mainStatus, m.item.Status, delta)
+	fmt.Fprintf(&b, "  Branch:      %s\n", m.branch)
 	b.WriteString("\n")
 
 	if m.showDiff {

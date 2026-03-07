@@ -354,9 +354,9 @@ func (m detailModel) renderContent() string {
 	item := m.item
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("\n  Status:      %s\n", colorizeStatus(item.Status)))
+	fmt.Fprintf(&b, "\n  Status:      %s\n", colorizeStatus(item.Status))
 	if m.branch != "" && m.mainStatus != "" && m.mainStatus != item.Status {
-		b.WriteString(fmt.Sprintf("  Pending:     %s → %s\n", m.mainStatus, item.Status))
+		fmt.Fprintf(&b, "  Pending:     %s → %s\n", m.mainStatus, item.Status)
 	}
 	if m.branch != "" {
 		b.WriteString(styleDim.Render(fmt.Sprintf("  Branch:      %s", m.branch)) + "\n")
@@ -366,63 +366,63 @@ func (m detailModel) renderContent() string {
 	}
 
 	if item.Type != "" {
-		b.WriteString(fmt.Sprintf("  Type:        %-14s", item.Type))
+		fmt.Fprintf(&b, "  Type:        %-14s", item.Type)
 	} else {
-		b.WriteString(fmt.Sprintf("  %-28s", ""))
+		fmt.Fprintf(&b, "  %-28s", "")
 	}
-	b.WriteString(fmt.Sprintf("Priority: %s\n", colorizePriority(item.Priority)))
+	fmt.Fprintf(&b, "Priority: %s\n", colorizePriority(item.Priority))
 
 	if item.Project != "" {
-		b.WriteString(fmt.Sprintf("  Project:     %-14s", item.Project))
+		fmt.Fprintf(&b, "  Project:     %-14s", item.Project)
 	} else {
-		b.WriteString(fmt.Sprintf("  %-28s", ""))
+		fmt.Fprintf(&b, "  %-28s", "")
 	}
-	b.WriteString(fmt.Sprintf("Effort:   %s\n", item.EffortLevel))
+	fmt.Fprintf(&b, "Effort:   %s\n", item.EffortLevel)
 
 	if item.PostedBy != "" {
-		b.WriteString(fmt.Sprintf("  Posted by:   %s\n", item.PostedBy))
+		fmt.Fprintf(&b, "  Posted by:   %s\n", item.PostedBy)
 	}
 
 	if item.ClaimedBy != "" {
-		b.WriteString(fmt.Sprintf("  Claimed by:  %s\n", item.ClaimedBy))
+		fmt.Fprintf(&b, "  Claimed by:  %s\n", item.ClaimedBy)
 	}
 
 	if len(item.Tags) > 0 {
-		b.WriteString(fmt.Sprintf("  Tags:        %s\n", strings.Join(item.Tags, ", ")))
+		fmt.Fprintf(&b, "  Tags:        %s\n", strings.Join(item.Tags, ", "))
 	}
 
 	if item.CreatedAt != "" {
-		b.WriteString(fmt.Sprintf("  Created:     %s\n", item.CreatedAt))
+		fmt.Fprintf(&b, "  Created:     %s\n", item.CreatedAt)
 	}
 	if item.UpdatedAt != "" {
-		b.WriteString(fmt.Sprintf("  Updated:     %s\n", item.UpdatedAt))
+		fmt.Fprintf(&b, "  Updated:     %s\n", item.UpdatedAt)
 	}
 
 	if item.Description != "" {
 		b.WriteString("\n  Description:\n")
-		b.WriteString(fmt.Sprintf("    %s\n", item.Description))
+		fmt.Fprintf(&b, "    %s\n", item.Description)
 	}
 
 	if m.completion != nil {
-		b.WriteString(fmt.Sprintf("\n  Completion:  %s\n", m.completion.ID))
+		fmt.Fprintf(&b, "\n  Completion:  %s\n", m.completion.ID)
 		if m.completion.Evidence != "" {
-			b.WriteString(fmt.Sprintf("    Evidence:    %s\n", m.completion.Evidence))
+			fmt.Fprintf(&b, "    Evidence:    %s\n", m.completion.Evidence)
 		}
-		b.WriteString(fmt.Sprintf("    Completed by: %s\n", m.completion.CompletedBy))
+		fmt.Fprintf(&b, "    Completed by: %s\n", m.completion.CompletedBy)
 	}
 
 	if m.stamp != nil {
-		b.WriteString(fmt.Sprintf("\n  Stamp:       %s\n", m.stamp.ID))
-		b.WriteString(fmt.Sprintf("    Quality: %d  Reliability: %d  Severity: %s\n",
-			m.stamp.Quality, m.stamp.Reliability, m.stamp.Severity))
+		fmt.Fprintf(&b, "\n  Stamp:       %s\n", m.stamp.ID)
+		fmt.Fprintf(&b, "    Quality: %d  Reliability: %d  Severity: %s\n",
+			m.stamp.Quality, m.stamp.Reliability, m.stamp.Severity)
 		if len(m.stamp.SkillTags) > 0 {
-			b.WriteString(fmt.Sprintf("    Skills:      %s\n", strings.Join(m.stamp.SkillTags, ", ")))
+			fmt.Fprintf(&b, "    Skills:      %s\n", strings.Join(m.stamp.SkillTags, ", "))
 		}
 		if m.stamp.Author != "" {
-			b.WriteString(fmt.Sprintf("    Accepted by: %s\n", m.stamp.Author))
+			fmt.Fprintf(&b, "    Accepted by: %s\n", m.stamp.Author)
 		}
 		if m.stamp.Message != "" {
-			b.WriteString(fmt.Sprintf("    Message:     %s\n", m.stamp.Message))
+			fmt.Fprintf(&b, "    Message:     %s\n", m.stamp.Message)
 		}
 	}
 
@@ -441,7 +441,7 @@ func (m detailModel) renderContent() string {
 	case m.deltaConfirm != nil:
 		b.WriteString(styleConfirm.Render(fmt.Sprintf("  %s", m.deltaConfirm.label)))
 	case m.executing:
-		b.WriteString(fmt.Sprintf("  %s %s", m.spinner.View(), m.executingLabel))
+		fmt.Fprintf(&b, "  %s %s", m.spinner.View(), m.executingLabel)
 	case m.result != "":
 		b.WriteString("  " + m.result)
 		b.WriteByte('\n')

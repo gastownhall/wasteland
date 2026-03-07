@@ -100,12 +100,12 @@ func (m settingsModel) view(cfg Config) string {
 	b.WriteString("\n\n")
 
 	// Read-only context.
-	b.WriteString(fmt.Sprintf("  Rig:         %s\n", cfg.RigHandle))
-	b.WriteString(fmt.Sprintf("  Upstream:    %s\n", cfg.Upstream))
-	b.WriteString(fmt.Sprintf("  Provider:    %s\n", cfg.ProviderType))
-	b.WriteString(fmt.Sprintf("  Fork:        %s/%s\n", cfg.ForkOrg, cfg.ForkDB))
-	b.WriteString(fmt.Sprintf("  Local:       %s\n", cfg.LocalDir))
-	b.WriteString(fmt.Sprintf("  Joined:      %s\n", cfg.JoinedAt))
+	fmt.Fprintf(&b, "  Rig:         %s\n", cfg.RigHandle)
+	fmt.Fprintf(&b, "  Upstream:    %s\n", cfg.Upstream)
+	fmt.Fprintf(&b, "  Provider:    %s\n", cfg.ProviderType)
+	fmt.Fprintf(&b, "  Fork:        %s/%s\n", cfg.ForkOrg, cfg.ForkDB)
+	fmt.Fprintf(&b, "  Local:       %s\n", cfg.LocalDir)
+	fmt.Fprintf(&b, "  Joined:      %s\n", cfg.JoinedAt)
 
 	b.WriteString("\n")
 	b.WriteString(styleDim.Render("  ─── Editable ───────────────────────"))
