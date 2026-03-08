@@ -310,6 +310,7 @@ func runServeHosted(cmd *cobra.Command, stdout, _ io.Writer) error {
 	defer pendingCache.Stop()
 	anonClient := sdk.New(sdk.ClientConfig{
 		DB:               publicDB,
+		Mode:             federation.ModePR,
 		ListPendingItems: pendingCache.Get,
 	})
 	apiServer.SetPublicClient(anonClient)

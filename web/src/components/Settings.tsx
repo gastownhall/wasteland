@@ -8,7 +8,7 @@ import styles from "./Settings.module.css";
 export function Settings() {
   const navigate = useNavigate();
   const { wastelands, active } = useWasteland();
-  const [mode, setMode] = useState("wild-west");
+  const [mode, setMode] = useState("pr");
   const [signing, setSigning] = useState(false);
   const [rigHandle, setRigHandle] = useState("");
   const [loading, setLoading] = useState(true);
@@ -21,7 +21,7 @@ export function Settings() {
       try {
         const cfg = await config();
         setRigHandle(cfg.rig_handle);
-        setMode(cfg.mode || "wild-west");
+        setMode(cfg.mode || "pr");
         setHosted(!!cfg.hosted);
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Failed to load config");

@@ -65,11 +65,12 @@ export function BrowseList() {
       browse(filter)
         .then((resp) => {
           setItems(resp.items);
+          setSelection(-1);
         })
         .catch(() => {});
     }, 30_000);
     return () => clearInterval(id);
-  }, [filter]);
+  }, [filter, setSelection]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
