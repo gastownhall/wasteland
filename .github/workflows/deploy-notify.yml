@@ -11,28 +11,55 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
-      - name: Get commit info
+      - name: Build commit summary
         id: info
         run: |
-          echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-          echo "message=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
-          echo "author=$(git log -1 --pretty=%an)" >> "$GITHUB_OUTPUT"
+          # Compare against the previous production tip (before this push)
+          BEFORE="${{ github.event.before }}"
+          HEAD="${{ github.sha }}"
+          SHORT_HEAD="$(git rev-parse --short HEAD)"
+
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            # First push to production — just show the HEAD commit
+            LOG="$(git log -1 --pretty='• \`%h\` %s (%an)')"
+            COUNT=1
+          else
+            COUNT="$(git rev-list --count "${BEFORE}..${HEAD}")"
+            LOG="$(git log --pretty='• \`%h\` %s (%an)' "${BEFORE}..${HEAD}" | head -15)"
+            if [ "$COUNT" -gt 15 ]; then
+              LOG="${LOG}
+…and $((COUNT - 15)) more"
+            fi
+          fi
+
+          # Write multiline output
+          {
+            echo "log<<DELIM"
+            echo "$LOG"
+            echo "DELIM"
+          } >> "$GITHUB_OUTPUT"
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$SHORT_HEAD" >> "$GITHUB_OUTPUT"
 
       - name: Notify Discord
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          curl -fsSL -H "Content-Type: application/json" -d "{
-            \"embeds\": [{
-              \"title\": \"Wasteland deployed to production\",
-              \"description\": \"\`${{ steps.info.outputs.short_sha }}\` ${{ steps.info.outputs.message }}\",
-              \"color\": 5025616,
-              \"fields\": [
-                {\"name\": \"Author\", \"value\": \"${{ steps.info.outputs.author }}\", \"inline\": true},
-                {\"name\": \"Branch\", \"value\": \"production\", \"inline\": true}
+          jq -n \
+            --arg title "Wasteland deployed to production" \
+            --arg desc "${{ steps.info.outputs.log }}" \
+            --arg count "${{ steps.info.outputs.count }} commit(s)" \
+            --arg sha "${{ steps.info.outputs.short_sha }}" \
+            --arg url "https://github.com/${{ github.repository }}/compare/${{ github.event.before }}...${{ github.sha }}" \
+            '{embeds: [{
+              title: $title,
+              description: $desc,
+              color: 5025616,
+              fields: [
+                {name: "Commits", value: $count, inline: true},
+                {name: "Head", value: ("`" + $sha + "`"), inline: true}
               ],
-              \"url\": \"https://github.com/${{ github.repository }}/commit/${{ github.sha }}\"
-            }]
-          }" "$DISCORD_WEBHOOK"
+              url: $url
+            }]}' | curl -fsSL -H "Content-Type: application/json" -d @- "$DISCORD_WEBHOOK"
