@@ -33,7 +33,8 @@ type Profile struct {
 	Creativity  float64 `json:"creativity"`
 
 	// Aggregated from the-pile stamps (GitHub analysis, NOT wasteland reputation)
-	AssessmentCount int          `json:"assessment_count"`
+	AssessmentCount int `json:"assessment_count"`
+
 	Languages    []SkillEntry `json:"languages,omitempty"`
 	Domains      []SkillEntry `json:"domains,omitempty"`
 	Capabilities []SkillEntry `json:"capabilities,omitempty"`

@@ -94,6 +94,41 @@ func TestQueryProfile_Success(t *testing.T) {
 	if profile.Quality < 4.5 {
 		t.Errorf("quality = %f, want >= 4.5 (0.95 * 5)", profile.Quality)
 	}
+	// Empty stamp rows → AssessmentCount should be 0
+	if profile.AssessmentCount != 0 {
+		t.Errorf("AssessmentCount = %d, want 0 (no stamp rows)", profile.AssessmentCount)
+	}
+}
+
+func TestQueryProfile_WithStamps(t *testing.T) {
+	sheetJSON, _ := json.Marshal(map[string]any{
+		"identity":         map[string]any{"display_name": "Test"},
+		"value_dimensions": map[string]any{"quality": 0.5},
+	})
+
+	q := &fakeQuerier{rows: map[string][]map[string]any{
+		"SELECT handle": {
+			{
+				"handle":     "test",
+				"source":     "github",
+				"sheet_json": string(sheetJSON),
+				"confidence": "0.8",
+				"created_at": "2024-01-01",
+			},
+		},
+		"SELECT skill_tags": {
+			{"skill_tags": `["go"]`, "valence": `{"quality":4,"reliability":3,"creativity":2}`, "confidence": "0.9", "message": "Strong Go skills"},
+			{"skill_tags": `["python"]`, "valence": `{"quality":3,"reliability":4,"creativity":3}`, "confidence": "0.8", "message": "Python experience"},
+		},
+	}}
+
+	profile, err := QueryProfile(q, "test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if profile.AssessmentCount != 2 {
+		t.Errorf("AssessmentCount = %d, want 2", profile.AssessmentCount)
+	}
 }
 
 func TestSearchProfiles(t *testing.T) {

@@ -65,7 +65,10 @@ export function ProfileView() {
             {(data.confidence * 100).toFixed(0)}% confidence
           </span>
           {data.assessment_count > 0 && (
-            <span className={styles.assessmentBadge} title="Skill assessments from GitHub profile analysis — not Wasteland reputation stamps">
+            <span
+              className={styles.assessmentBadge}
+              title="Skill assessments from GitHub profile analysis — not Wasteland reputation stamps"
+            >
               {data.assessment_count} {data.assessment_count === 1 ? "assessment" : "assessments"}
             </span>
           )}

@@ -134,7 +134,7 @@ The web UI provides:
   config, sync upstream.
 - **Profiles** — look up developer character sheets from the-pile. Search by
   handle or name, view skills, value dimensions, notable projects, and
-  reputation stamps. Navigate to `/profile` for search or
+  GitHub assessments. Navigate to `/profile` for search or
   `/profile/<handle>` for a direct lookup.
 - **Command palette** — press `Cmd+K` (or `Ctrl+K`) to navigate, create
   items, or view keyboard shortcuts.

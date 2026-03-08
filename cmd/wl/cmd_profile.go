@@ -19,7 +19,7 @@ func newProfileCmd(stdout, stderr io.Writer) *cobra.Command {
 		Long: `Look up a developer's character sheet from hop/the-pile.
 
 Shows identity, skills (languages, domains, capabilities), notable projects,
-and value dimensions assembled from boot blocks and reputation stamps.
+and value dimensions assembled from boot blocks and GitHub assessments.
 
 EXAMPLES:
   wl profile torvalds            # Show Torvalds' profile

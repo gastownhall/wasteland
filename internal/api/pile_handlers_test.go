@@ -101,6 +101,9 @@ func TestHandleProfile_Success(t *testing.T) {
 	if profile.Handle != "test" {
 		t.Errorf("handle = %q, want test", profile.Handle)
 	}
+	if profile.AssessmentCount != 0 {
+		t.Errorf("assessment_count = %d, want 0", profile.AssessmentCount)
+	}
 }
 
 func TestHandleProfileSearch_LimitClamped(t *testing.T) {
