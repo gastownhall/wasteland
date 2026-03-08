@@ -27,3 +27,25 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notify Discord
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TAG: ${{ github.ref_name }}
+          RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+        run: |
+          CHANGELOG="$(git log --pretty='%h %s (%an)' "$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD" | head -15)"
+          jq -n \
+            --arg title "Wasteland $TAG released" \
+            --arg desc "$CHANGELOG" \
+            --arg tag "$TAG" \
+            --arg url "$RELEASE_URL" \
+            '{embeds: [{
+              title: $title,
+              description: $desc,
+              color: 5025616,
+              fields: [
+                {name: "Tag", value: $tag, inline: true}
+              ],
+              url: $url
+            }]}' | curl -fsSL -H "Content-Type: application/json" -d @- "$DISCORD_WEBHOOK"
