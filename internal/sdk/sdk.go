@@ -20,14 +20,15 @@ type ClientConfig struct {
 	NoPush    bool       // skip pushing after mutations
 
 	// Optional callbacks — nil disables the feature.
-	CreatePR         func(branch string) (string, error)
-	CheckPR          func(branch string) string
-	ClosePR          func(branch string) error // close the PR for the given branch
-	LoadDiff         func(branch string) (string, error)
-	SaveConfig       func(mode string, signing bool) error
-	ListPendingItems func() (map[string][]PendingItem, error) // returns wanted IDs with pending upstream PR state
-	BranchURL        func(branch string) string               // returns a web URL for the branch
-	CloseUpstreamPR  func(prURL string) error                 // close an upstream PR by its web URL
+	CreatePR          func(branch string) (string, error)
+	CheckPR           func(branch string) string
+	ClosePR           func(branch string) error // close the PR for the given branch
+	LoadDiff          func(branch string) (string, error)
+	LoadPendingDetail func(wantedID string, pending PendingItem) (*commons.WantedItem, *commons.CompletionRecord, *commons.Stamp, error)
+	SaveConfig        func(mode string, signing bool) error
+	ListPendingItems  func() (map[string][]PendingItem, error) // returns wanted IDs with pending upstream PR state
+	BranchURL         func(branch string) string               // returns a web URL for the branch
+	CloseUpstreamPR   func(prURL string) error                 // close an upstream PR by its web URL
 }
 
 // Client provides mode-aware operations against the Wasteland wanted board.
@@ -48,6 +49,9 @@ type Client struct {
 	ClosePR func(branch string) error
 	// LoadDiff returns a diff for the given branch. Nil disables the feature.
 	LoadDiff func(branch string) (string, error)
+	// LoadPendingDetail loads detail for a pending upstream item from the source branch's fork.
+	// Nil falls back to reading the branch from the client's configured DB.
+	LoadPendingDetail func(wantedID string, pending PendingItem) (*commons.WantedItem, *commons.CompletionRecord, *commons.Stamp, error)
 	// SaveConfig persists mode and signing settings. Nil disables the feature.
 	SaveConfig func(mode string, signing bool) error
 	// ListPendingItems returns wanted IDs with pending upstream PR state. Nil disables the feature.
@@ -61,20 +65,21 @@ type Client struct {
 // New creates a Client from the given config.
 func New(cfg ClientConfig) *Client {
 	return &Client{
-		db:               cfg.DB,
-		rigHandle:        cfg.RigHandle,
-		mode:             cfg.Mode,
-		signing:          cfg.Signing,
-		hopURI:           cfg.HopURI,
-		noPush:           cfg.NoPush,
-		CreatePR:         cfg.CreatePR,
-		CheckPR:          cfg.CheckPR,
-		ClosePR:          cfg.ClosePR,
-		LoadDiff:         cfg.LoadDiff,
-		SaveConfig:       cfg.SaveConfig,
-		ListPendingItems: cfg.ListPendingItems,
-		BranchURL:        cfg.BranchURL,
-		CloseUpstreamPR:  cfg.CloseUpstreamPR,
+		db:                cfg.DB,
+		rigHandle:         cfg.RigHandle,
+		mode:              cfg.Mode,
+		signing:           cfg.Signing,
+		hopURI:            cfg.HopURI,
+		noPush:            cfg.NoPush,
+		CreatePR:          cfg.CreatePR,
+		CheckPR:           cfg.CheckPR,
+		ClosePR:           cfg.ClosePR,
+		LoadDiff:          cfg.LoadDiff,
+		LoadPendingDetail: cfg.LoadPendingDetail,
+		SaveConfig:        cfg.SaveConfig,
+		ListPendingItems:  cfg.ListPendingItems,
+		BranchURL:         cfg.BranchURL,
+		CloseUpstreamPR:   cfg.CloseUpstreamPR,
 	}
 }
 
@@ -90,19 +95,20 @@ func (c *Client) RigHandle() string { return c.rigHandle }
 // impersonation of another user's read-only view.
 func (c *Client) WithRigHandle(handle string) *Client {
 	return &Client{
-		db:               c.db,
-		rigHandle:        handle,
-		mode:             c.mode,
-		signing:          c.signing,
-		hopURI:           c.hopURI,
-		noPush:           c.noPush,
-		CreatePR:         c.CreatePR,
-		CheckPR:          c.CheckPR,
-		ClosePR:          c.ClosePR,
-		LoadDiff:         c.LoadDiff,
-		SaveConfig:       c.SaveConfig,
-		ListPendingItems: c.ListPendingItems,
-		BranchURL:        c.BranchURL,
-		CloseUpstreamPR:  c.CloseUpstreamPR,
+		db:                c.db,
+		rigHandle:         handle,
+		mode:              c.mode,
+		signing:           c.signing,
+		hopURI:            c.hopURI,
+		noPush:            c.noPush,
+		CreatePR:          c.CreatePR,
+		CheckPR:           c.CheckPR,
+		ClosePR:           c.ClosePR,
+		LoadDiff:          c.LoadDiff,
+		LoadPendingDetail: c.LoadPendingDetail,
+		SaveConfig:        c.SaveConfig,
+		ListPendingItems:  c.ListPendingItems,
+		BranchURL:         c.BranchURL,
+		CloseUpstreamPR:   c.CloseUpstreamPR,
 	}
 }

@@ -699,7 +699,7 @@ func TestDoltHubProvider_ListPendingWantedIDs_CompletionQueryFails_GracefulDegra
 
 func TestDoltHubProvider_ListPendingWantedIDs_StaleEntriesFiltered(t *testing.T) {
 	// Stale fork state should be filtered:
-	// 1. status "open" = untouched item
+	// 1. status "open" = untouched item (unless the row is newly added)
 	// 2. claimed_by someone other than PR author = inherited claim
 	// Only intentional actions (claimed_by == author) pass through.
 	mux := http.NewServeMux()
@@ -793,6 +793,59 @@ func TestDoltHubProvider_ListPendingWantedIDs_StaleEntriesFiltered(t *testing.T)
 	}
 	if pending[0].Status != "claimed" {
 		t.Errorf("expected status=claimed, got %s", pending[0].Status)
+	}
+}
+
+func TestDoltHubProvider_ListPendingWantedIDs_NewOpenItemIncluded(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/org/db/pulls", func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/pulls/") {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"pulls": []map[string]any{
+				{"pull_id": "1", "state": "open"},
+			},
+		})
+	})
+	mux.HandleFunc("/org/db/pulls/1", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"from_branch":       "wl/alice/w-new",
+			"from_branch_owner": "alice-fork",
+			"author":            "alice",
+		})
+	})
+	mux.HandleFunc("/alice-fork/db/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"rows": []map[string]string{
+				{"id": "w-new", "status": "open", "claimed_by": "", "diff_type": "added"},
+			},
+		})
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	dolthubAPIBase = server.URL
+	dolthubRepoBase = server.URL + "/repositories"
+
+	provider := NewDoltHubProvider("token")
+	ids, err := provider.ListPendingWantedIDs("org", "db")
+	if err != nil {
+		t.Fatalf("ListPendingWantedIDs() error: %v", err)
+	}
+
+	pending := ids["w-new"]
+	if len(pending) != 1 {
+		t.Fatalf("expected 1 pending entry for w-new, got %+v", pending)
+	}
+	if pending[0].Status != "open" {
+		t.Errorf("expected status=open, got %+v", pending[0])
+	}
+	if pending[0].RigHandle != "alice" {
+		t.Errorf("expected rig_handle=alice, got %+v", pending[0])
 	}
 }
 

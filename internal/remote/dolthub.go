@@ -672,6 +672,7 @@ func (d *DoltHubProvider) ListPendingWantedIDs(upstreamOrg, db string) (map[stri
 		wantedID string
 		state    PendingWantedState
 		author   string // PR author, for filtering inherited claims
+		isAdded  bool
 	}
 	diffCh := make(chan []pendingEntry, len(prs))
 	var wg sync.WaitGroup
@@ -727,6 +728,7 @@ func (d *DoltHubProvider) ListPendingWantedIDs(upstreamOrg, db string) (map[stri
 						entries = append(entries, pendingEntry{
 							wantedID: id,
 							author:   pr.author,
+							isAdded:  !exists,
 							state: PendingWantedState{
 								RigHandle: rigHandle,
 								Status:    forkStatus,
@@ -779,6 +781,7 @@ func (d *DoltHubProvider) ListPendingWantedIDs(upstreamOrg, db string) (map[stri
 				entries = append(entries, pendingEntry{
 					wantedID: id,
 					author:   pr.author,
+					isAdded:  row["diff_type"] == "added",
 					state: PendingWantedState{
 						RigHandle: rigHandle,
 						Status:    forkStatus,
@@ -808,7 +811,13 @@ func (d *DoltHubProvider) ListPendingWantedIDs(upstreamOrg, db string) (map[stri
 			// Skip stale fork state that doesn't represent intentional action.
 			// A diff appears when a branch predates an upstream update — the
 			// branch carries forward old state the fork owner never touched.
-			if e.state.Status == "open" {
+			//
+			// Filter rules:
+			// 1. status "open" = untouched item (stale copy), unless the row
+			//    was newly added on the branch
+			// 2. claimed_by set to someone other than the PR author =
+			//    inherited claim from a previous upstream state
+			if e.state.Status == "open" && !e.isAdded {
 				continue
 			}
 			if e.state.Status == "claimed" && e.state.ClaimedBy != "" && e.state.ClaimedBy != e.author {

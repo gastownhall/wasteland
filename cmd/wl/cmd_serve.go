@@ -204,9 +204,10 @@ func runServe(cmd *cobra.Command, stdout, stderr io.Writer) error {
 		ClosePR: func(branch string) error {
 			return closePRForBranch(cfg, branch)
 		},
-		ListPendingItems: listPendingItemsFromPRs(cfg),
-		BranchURL:        branchURLCallback(cfg),
-		CloseUpstreamPR:  closeUpstreamPRCallback(cfg),
+		LoadPendingDetail: pendingDetailLoaderCallback(cfg),
+		ListPendingItems:  listPendingItemsFromPRs(cfg),
+		BranchURL:         branchURLCallback(cfg),
+		CloseUpstreamPR:   closeUpstreamPRCallback(cfg),
 	})
 
 	server := api.New(client)
@@ -309,9 +310,10 @@ func runServeHosted(cmd *cobra.Command, stdout, _ io.Writer) error {
 	pendingCache := newPendingItemsCache("hop", "wl-commons", 2*time.Minute)
 	defer pendingCache.Stop()
 	anonClient := sdk.New(sdk.ClientConfig{
-		DB:               publicDB,
-		Mode:             federation.ModePR,
-		ListPendingItems: pendingCache.Get,
+		DB:                publicDB,
+		Mode:              federation.ModePR,
+		LoadPendingDetail: pendingDetailLoader("hop", "wl-commons", federation.ModePR, ""),
+		ListPendingItems:  pendingCache.Get,
 	})
 	apiServer.SetPublicClient(anonClient)
 
@@ -386,6 +388,7 @@ func newPendingItemsCache(upstreamOrg, db string, interval time.Duration) *pendi
 					Branch:      p.Branch,
 					BranchURL:   p.BranchURL,
 					PRURL:       p.PRURL,
+					ForkOwner:   p.ForkOwner,
 					CompletedBy: p.CompletedBy,
 					Evidence:    p.Evidence,
 				}

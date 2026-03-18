@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -398,6 +399,77 @@ func TestDetail(t *testing.T) {
 	}
 	if len(resp.Actions) == 0 {
 		t.Error("expected available actions")
+	}
+}
+
+func TestHostedPublic_ReadsPendingOnlyForkItem(t *testing.T) {
+	mainDB := newFakeDB()
+	forkDB := newFakeDB()
+	branch := "wl/charlie/w-new"
+	forkDB.branches[branch] = true
+	forkDB.branchItems[branch] = map[string]*fakeItem{
+		"w-new": {
+			id:          "w-new",
+			title:       "New docs task",
+			description: "Document binary install paths",
+			project:     "gascity",
+			typ:         "docs",
+			priority:    1,
+			postedBy:    "charlie",
+			status:      "open",
+			effortLevel: "small",
+		},
+	}
+
+	publicClient := sdk.New(sdk.ClientConfig{
+		DB:   mainDB,
+		Mode: "pr",
+		LoadPendingDetail: func(wantedID string, pending sdk.PendingItem) (*commons.WantedItem, *commons.CompletionRecord, *commons.Stamp, error) {
+			return commons.QueryFullDetailAsOf(forkDB, wantedID, pending.Branch)
+		},
+		ListPendingItems: func() (map[string][]sdk.PendingItem, error) {
+			return map[string][]sdk.PendingItem{
+				"w-new": {{
+					RigHandle: "charlie",
+					Status:    "open",
+					Branch:    branch,
+					BranchURL: "https://example.com/branch",
+					PRURL:     "https://example.com/pr/1",
+					ForkOwner: "charlie",
+				}},
+			}, nil
+		},
+	})
+
+	srv := NewHosted(func(*http.Request) (*sdk.Client, error) {
+		return nil, errors.New("not authenticated")
+	})
+	srv.SetPublicClient(publicClient)
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	var browse BrowseResponse
+	r := getJSON(t, ts, "/api/wanted?view=all", &browse)
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 browse, got %d", r.StatusCode)
+	}
+	if len(browse.Items) != 1 || browse.Items[0].ID != "w-new" {
+		t.Fatalf("expected pending fork item in browse, got %+v", browse.Items)
+	}
+
+	var detail DetailResponse
+	r = getJSON(t, ts, "/api/wanted/w-new", &detail)
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 detail, got %d", r.StatusCode)
+	}
+	if detail.Item == nil || detail.Item.ID != "w-new" {
+		t.Fatalf("expected detail for w-new, got %+v", detail.Item)
+	}
+	if detail.Branch != branch {
+		t.Errorf("branch = %q, want %q", detail.Branch, branch)
+	}
+	if detail.PRURL != "https://example.com/pr/1" {
+		t.Errorf("prURL = %q", detail.PRURL)
 	}
 }
 

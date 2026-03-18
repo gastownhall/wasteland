@@ -864,6 +864,7 @@ func dolthubListPendingItems(cfg *federation.Config) func() (map[string][]sdk.Pe
 					Branch:      p.Branch,
 					BranchURL:   p.BranchURL,
 					PRURL:       p.PRURL,
+					ForkOwner:   p.ForkOwner,
 					CompletedBy: p.CompletedBy,
 					Evidence:    p.Evidence,
 				}
@@ -941,6 +942,32 @@ func ghListPendingItems(ghPath, upstreamRepo string) func() (map[string][]sdk.Pe
 		cached = ids
 		cachedAt = time.Now()
 		return cached, nil
+	}
+}
+
+// pendingDetailLoaderCallback returns a callback that can read branch-only
+// pending items from the correct DoltHub fork. Returns nil when the current
+// config does not support fork-aware remote reads.
+func pendingDetailLoaderCallback(cfg *federation.Config) func(string, sdk.PendingItem) (*commons.WantedItem, *commons.CompletionRecord, *commons.Stamp, error) {
+	if cfg.ResolveBackend() == federation.BackendLocal || cfg.ResolveProviderType() != "dolthub" {
+		return nil
+	}
+
+	upstreamOrg, db, err := federation.ParseUpstream(cfg.Upstream)
+	if err != nil {
+		return nil
+	}
+
+	return pendingDetailLoader(upstreamOrg, db, cfg.ResolveMode(), commons.DoltHubToken())
+}
+
+func pendingDetailLoader(upstreamOrg, db, mode, token string) func(string, sdk.PendingItem) (*commons.WantedItem, *commons.CompletionRecord, *commons.Stamp, error) {
+	return func(wantedID string, pending sdk.PendingItem) (*commons.WantedItem, *commons.CompletionRecord, *commons.Stamp, error) {
+		if pending.ForkOwner == "" || pending.Branch == "" {
+			return nil, nil, nil, fmt.Errorf("pending item %q is missing fork owner or branch", wantedID)
+		}
+		forkDB := backend.NewRemoteDB(token, upstreamOrg, db, pending.ForkOwner, db, mode)
+		return commons.QueryFullDetailAsOf(forkDB, wantedID, pending.Branch)
 	}
 }
 

@@ -90,6 +90,24 @@ func TestParseSimpleCSV_TrimsWhitespace(t *testing.T) {
 	}
 }
 
+func TestParseSimpleCSV_MultilineQuotedField(t *testing.T) {
+	t.Parallel()
+	data := "id,description,priority\nw-abc,\"first line\n\nsecond line\",1\n"
+	got := parseSimpleCSV(data)
+	if len(got) != 1 {
+		t.Fatalf("got %d rows, want 1", len(got))
+	}
+	if got[0]["id"] != "w-abc" {
+		t.Errorf("id = %q, want %q", got[0]["id"], "w-abc")
+	}
+	if got[0]["description"] != "first line\n\nsecond line" {
+		t.Errorf("description = %q, want multiline field preserved", got[0]["description"])
+	}
+	if got[0]["priority"] != "1" {
+		t.Errorf("priority = %q, want %q", got[0]["priority"], "1")
+	}
+}
+
 func TestEscapeSQL_SingleQuotes(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

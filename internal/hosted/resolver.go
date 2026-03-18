@@ -60,6 +60,7 @@ func newPendingUpstreamCache(provider *remote.DoltHubProvider, upOrg, upDB strin
 					Branch:      p.Branch,
 					BranchURL:   p.BranchURL,
 					PRURL:       p.PRURL,
+					ForkOwner:   p.ForkOwner,
 					CompletedBy: p.CompletedBy,
 					Evidence:    p.Evidence,
 				}
@@ -269,6 +270,13 @@ func (wr *WorkspaceResolver) buildClient(wl *WastelandConfig, rigHandle, connect
 			entry.Mode = mode
 			entry.Signing = signing
 			return wr.nango.SetMetadata(connectionID, currentMeta)
+		},
+		LoadPendingDetail: func(wantedID string, pending sdk.PendingItem) (*commons.WantedItem, *commons.CompletionRecord, *commons.Stamp, error) {
+			if pending.ForkOwner == "" || pending.Branch == "" {
+				return nil, nil, nil, fmt.Errorf("pending item %q is missing fork owner or branch", wantedID)
+			}
+			forkDB := backend.NewRemoteDB(apiKey, upOrg, upDB, pending.ForkOwner, upDB, mode)
+			return commons.QueryFullDetailAsOf(forkDB, wantedID, pending.Branch)
 		},
 	})
 
