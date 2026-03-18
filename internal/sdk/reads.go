@@ -1,6 +1,8 @@
 package sdk
 
 import (
+	"strings"
+
 	"github.com/gastownhall/wasteland/internal/commons"
 )
 
@@ -12,8 +14,14 @@ type PendingItem struct {
 	Branch      string // e.g. "wl/alice/w-001"
 	BranchURL   string // web URL for the fork branch
 	PRURL       string // web URL for the upstream PR
+	ForkOwner   string // owner of the fork that hosts Branch
 	CompletedBy string // from fork branch completions table
 	Evidence    string // from fork branch completions table
+}
+
+// stateRank defines lifecycle ordering for furthest-future state overlay.
+var stateRank = map[string]int{
+	"open": 0, "claimed": 1, "in_review": 2, "completed": 3,
 }
 
 // BrowseResult holds the items returned by Browse along with branch metadata.
@@ -47,43 +55,138 @@ func (c *Client) Browse(filter commons.BrowseFilter) (*BrowseResult, error) {
 		return nil, err
 	}
 
-	// In "all" view, merge upstream PR state if the callback is set.
+	// In non-upstream views, merge pending PR state if the callback is set.
 	var upstreamItems map[string][]PendingItem
 	view := filter.View
 	if view == "" {
 		view = "all"
 	}
-	if view == "all" && c.ListPendingItems != nil {
+	if view != "upstream" && c.ListPendingItems != nil {
 		upstreamItems, err = c.ListPendingItems()
 		if err == nil {
+			if view == "mine" {
+				upstreamItems = filterPendingItemsForRig(upstreamItems, c.rigHandle)
+			}
 			for id, pending := range upstreamItems {
 				pendingIDs[id] += len(pending)
 			}
 		}
 	}
 
-	// Overlay claimed_by to reflect pending upstream candidates.
+	seen := make(map[string]bool, len(items))
+	// Overlay furthest upstream state onto items.
 	for i := range items {
+		seen[items[i].ID] = true
 		pending := upstreamItems[items[i].ID]
 		if len(pending) == 0 {
 			continue
 		}
-		best := pending[0]
-		totalCandidates := len(pending)
-		if items[i].ClaimedBy != "" {
-			totalCandidates++
+		overlayPendingClaimedBy(&items[i], pending)
+	}
+
+	for id, pending := range upstreamItems {
+		if seen[id] || len(pending) == 0 {
+			continue
 		}
-		switch {
-		case totalCandidates > 1:
-			items[i].ClaimedBy = "Multiple (pending)"
-		case best.ClaimedBy != "":
-			items[i].ClaimedBy = best.ClaimedBy + " (pending)"
-		case best.RigHandle != "":
-			items[i].ClaimedBy = best.RigHandle + " (pending)"
+		best := bestPendingState(pending)
+		if best.Branch == "" {
+			continue
 		}
+		item, _, _, err := c.loadPendingDetail(id, best)
+		if err != nil {
+			continue
+		}
+		if !matchesPendingBrowseFilter(item, best.Status, best.ClaimedBy, filter) {
+			continue
+		}
+		summary := commons.WantedSummary{
+			ID:          item.ID,
+			Title:       item.Title,
+			Description: item.Description,
+			Project:     item.Project,
+			Type:        item.Type,
+			Priority:    item.Priority,
+			PostedBy:    item.PostedBy,
+			ClaimedBy:   item.ClaimedBy,
+			Status:      best.Status,
+			EffortLevel: item.EffortLevel,
+		}
+		overlayPendingClaimedBy(&summary, pending)
+		items = append(items, summary)
 	}
 
 	return &BrowseResult{Items: items, PendingIDs: pendingIDs, UpstreamPending: upstreamItems}, nil
+}
+
+func filterPendingItemsForRig(items map[string][]PendingItem, rigHandle string) map[string][]PendingItem {
+	if len(items) == 0 {
+		return items
+	}
+	prefix := "wl/" + rigHandle + "/"
+	filtered := make(map[string][]PendingItem)
+	for id, pending := range items {
+		for _, p := range pending {
+			if strings.HasPrefix(p.Branch, prefix) || (p.Branch == "" && (p.RigHandle == rigHandle || p.ClaimedBy == rigHandle)) {
+				filtered[id] = append(filtered[id], p)
+			}
+		}
+	}
+	return filtered
+}
+
+func bestPendingState(pending []PendingItem) PendingItem {
+	best := pending[0]
+	for _, p := range pending[1:] {
+		if stateRank[p.Status] > stateRank[best.Status] {
+			best = p
+		}
+	}
+	return best
+}
+
+func overlayPendingClaimedBy(item *commons.WantedSummary, pending []PendingItem) {
+	best := bestPendingState(pending)
+	if best.Status == "open" {
+		return
+	}
+
+	totalCandidates := len(pending)
+	if item.ClaimedBy != "" {
+		totalCandidates++
+	}
+	switch {
+	case totalCandidates > 1:
+		item.ClaimedBy = "Multiple (pending)"
+	case best.ClaimedBy != "":
+		item.ClaimedBy = best.ClaimedBy + " (pending)"
+	case best.RigHandle != "":
+		item.ClaimedBy = best.RigHandle + " (pending)"
+	}
+}
+
+func matchesPendingBrowseFilter(item *commons.WantedItem, status, claimedBy string, f commons.BrowseFilter) bool {
+	if f.Status != "" && status != f.Status {
+		return false
+	}
+	if f.Type != "" && item.Type != f.Type {
+		return false
+	}
+	if f.Project != "" && item.Project != f.Project {
+		return false
+	}
+	if f.Priority >= 0 && item.Priority != f.Priority {
+		return false
+	}
+	if f.PostedBy != "" && item.PostedBy != f.PostedBy {
+		return false
+	}
+	if f.ClaimedBy != "" && claimedBy != f.ClaimedBy {
+		return false
+	}
+	if f.Search != "" && !strings.Contains(strings.ToLower(item.Title), strings.ToLower(f.Search)) {
+		return false
+	}
+	return true
 }
 
 // Detail fetches the complete state of a wanted item including actions.
@@ -101,6 +204,14 @@ func (c *Client) detailPR(wantedID string) (*DetailResult, error) {
 	}
 	effective := state.Effective()
 	if effective == nil {
+		upstreamPRs := c.fetchUpstreamPRs(wantedID)
+		if len(upstreamPRs) > 0 {
+			result, err := c.detailFromPending(wantedID, upstreamPRs)
+			if err == nil {
+				return result, nil
+			}
+			return nil, err
+		}
 		// Fall back to main query if resolve found nothing.
 		return c.detailWildWest(wantedID)
 	}
@@ -125,6 +236,39 @@ func (c *Client) detailPR(wantedID string) (*DetailResult, error) {
 	result.BranchActions = c.computeBranchActions(result)
 	result.UpstreamPRs = c.fetchUpstreamPRs(wantedID)
 	return result, nil
+}
+
+func (c *Client) loadPendingDetail(wantedID string, pending PendingItem) (*commons.WantedItem, *commons.CompletionRecord, *commons.Stamp, error) {
+	if c.LoadPendingDetail != nil {
+		item, completion, stamp, err := c.LoadPendingDetail(wantedID, pending)
+		if err == nil {
+			return item, completion, stamp, nil
+		}
+	}
+	return commons.QueryFullDetailAsOf(c.db, wantedID, pending.Branch)
+}
+
+func (c *Client) detailFromPending(wantedID string, pending []PendingItem) (*DetailResult, error) {
+	best := bestPendingState(pending)
+	if best.Branch == "" {
+		return c.detailWildWest(wantedID)
+	}
+
+	item, completion, stamp, err := c.loadPendingDetail(wantedID, best)
+	if err != nil {
+		return nil, err
+	}
+
+	return &DetailResult{
+		Item:        item,
+		Completion:  completion,
+		Stamp:       stamp,
+		Branch:      best.Branch,
+		BranchURL:   best.BranchURL,
+		PRURL:       best.PRURL,
+		Delta:       commons.ComputeDelta("", item.Status, true),
+		UpstreamPRs: pending,
+	}, nil
 }
 
 func (c *Client) detailWildWest(wantedID string) (*DetailResult, error) {

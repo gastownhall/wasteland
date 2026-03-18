@@ -31,8 +31,9 @@ var newSDKClient = func(cfg *federation.Config, noPush bool) (*sdk.Client, error
 		ClosePR: func(branch string) error {
 			return closePRForBranch(cfg, branch)
 		},
-		ListPendingItems: listPendingItemsFromPRs(cfg),
-		BranchURL:        branchURLCallback(cfg),
-		CloseUpstreamPR:  closeUpstreamPRCallback(cfg),
+		LoadPendingDetail: pendingDetailLoaderCallback(cfg),
+		ListPendingItems:  listPendingItemsFromPRs(cfg),
+		BranchURL:         branchURLCallback(cfg),
+		CloseUpstreamPR:   closeUpstreamPRCallback(cfg),
 	}), nil
 }

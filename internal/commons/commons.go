@@ -6,6 +6,7 @@ package commons
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -419,19 +420,35 @@ func QueryWanted(db DB, wantedID string) (*WantedItem, error) {
 
 // parseSimpleCSV parses CSV output from dolt sql into a slice of maps.
 func parseSimpleCSV(data string) []map[string]string {
-	lines := strings.Split(strings.TrimSpace(data), "\n")
-	if len(lines) < 2 {
+	data = strings.TrimSpace(data)
+	if data == "" {
 		return nil
 	}
 
-	headers := parseCSVLine(lines[0])
+	reader := csv.NewReader(strings.NewReader(data))
+	reader.FieldsPerRecord = -1
+	records, err := reader.ReadAll()
+	if err != nil || len(records) < 2 {
+		return nil
+	}
+
+	headers := records[0]
 	var result []map[string]string
 
-	for _, line := range lines[1:] {
-		if line == "" {
+	for _, fields := range records[1:] {
+		if len(fields) == 0 {
 			continue
 		}
-		fields := parseCSVLine(line)
+		blank := true
+		for _, field := range fields {
+			if strings.TrimSpace(field) != "" {
+				blank = false
+				break
+			}
+		}
+		if blank {
+			continue
+		}
 		row := make(map[string]string)
 		for i, h := range headers {
 			if i < len(fields) {
