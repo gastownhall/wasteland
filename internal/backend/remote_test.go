@@ -43,7 +43,7 @@ func TestRemoteDB_Query_Main(t *testing.T) {
 	})
 	defer cleanup()
 
-	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons", "pr")
+	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons")
 	db.client = srv.Client()
 
 	csv, err := db.Query("SELECT id, status FROM wanted", "")
@@ -79,7 +79,7 @@ func TestRemoteDB_Query_Branch(t *testing.T) {
 	})
 	defer cleanup()
 
-	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons", "pr")
+	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons")
 	db.client = srv.Client()
 
 	csv, err := db.Query("SELECT status FROM wanted WHERE id='w-001'", "wl/alice/w-001")
@@ -123,7 +123,7 @@ func TestRemoteDB_Exec(t *testing.T) {
 	})
 	defer cleanup()
 
-	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons", "pr")
+	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons")
 	db.client = srv.Client()
 
 	err := db.Exec("wl/alice/w-001", "wl claim: w-001", false,
@@ -164,7 +164,7 @@ func TestRemoteDB_Exec_SequentialMutation(t *testing.T) {
 	})
 	defer cleanup()
 
-	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons", "pr")
+	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons")
 	db.client = srv.Client()
 
 	err := db.Exec("wl/alice/w-001", "wl done: w-001", false,
@@ -187,7 +187,7 @@ func TestRemoteDB_Exec_MainBranch(t *testing.T) {
 	})
 	defer cleanup()
 
-	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons", "pr")
+	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons")
 	db.client = srv.Client()
 
 	err := db.Exec("", "wl claim: w-001", false,
@@ -213,7 +213,7 @@ func TestRemoteDB_Branches(t *testing.T) {
 	})
 	defer cleanup()
 
-	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons", "pr")
+	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons")
 	db.client = srv.Client()
 
 	branches, err := db.Branches("wl/alice/")
@@ -230,7 +230,7 @@ func TestRemoteDB_Branches(t *testing.T) {
 
 func TestRemoteDB_PushNoOps(t *testing.T) {
 	t.Parallel()
-	db := NewRemoteDB("token", "up", "db", "fork", "db", "pr")
+	db := NewRemoteDB("token", "up", "db", "fork", "db")
 
 	if err := db.PushBranch("branch", nil); err != nil {
 		t.Errorf("PushBranch should be no-op, got: %v", err)
@@ -238,8 +238,8 @@ func TestRemoteDB_PushNoOps(t *testing.T) {
 	if err := db.PushMain(nil); err != nil {
 		t.Errorf("PushMain should be no-op, got: %v", err)
 	}
-	if err := db.PushWithSync(nil); err != nil {
-		t.Errorf("PushWithSync should be no-op, got: %v", err)
+	if err := db.PushAllRemotes(nil); err != nil {
+		t.Errorf("PushAllRemotes should be no-op, got: %v", err)
 	}
 	if err := db.CanWildWest(); err == nil {
 		t.Error("CanWildWest should return error for remote DB")
@@ -287,7 +287,7 @@ func TestRemoteDB_Exec_Poll(t *testing.T) {
 	})
 	defer cleanup()
 
-	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons", "pr")
+	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons")
 	db.client = srv.Client()
 
 	err := db.Exec("some-branch", "test", false, "UPDATE wanted SET status='open'")
@@ -342,7 +342,7 @@ func TestRemoteDB_Exec_Poll_DoneResDetails(t *testing.T) {
 	})
 	defer cleanup()
 
-	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons", "pr")
+	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons")
 	db.client = srv.Client()
 
 	err := db.Exec("some-branch", "test", false, "INSERT INTO wanted VALUES (...)")
@@ -361,7 +361,7 @@ func TestRemoteDB_Query_Error(t *testing.T) {
 	})
 	defer cleanup()
 
-	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons", "pr")
+	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons")
 	db.client = srv.Client()
 
 	_, err := db.Query("SELECT 1", "")
@@ -375,7 +375,7 @@ func TestRemoteDB_Sync_NoOp(t *testing.T) {
 	// remote operations (dolt_remotes, DOLT_FETCH). Reads go directly to the
 	// upstream API so fork-level sync is unnecessary.
 	t.Parallel()
-	db := NewRemoteDB("token", "up", "db", "fork", "db", "pr")
+	db := NewRemoteDB("token", "up", "db", "fork", "db")
 	if err := db.Sync(); err != nil {
 		t.Errorf("Sync should be no-op, got: %v", err)
 	}
@@ -398,7 +398,7 @@ func TestRemoteDB_MergeBranch(t *testing.T) {
 	})
 	defer cleanup()
 
-	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons", "pr")
+	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons")
 	db.client = srv.Client()
 
 	if err := db.MergeBranch("wl/alice/w-001"); err != nil {
@@ -426,7 +426,7 @@ func TestRemoteDB_DeleteBranch(t *testing.T) {
 	})
 	defer cleanup()
 
-	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons", "pr")
+	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons")
 	db.client = srv.Client()
 
 	if err := db.DeleteBranch("wl/alice/w-001"); err != nil {
@@ -456,7 +456,7 @@ func TestRemoteDB_DeleteBranch_ReturnsError(t *testing.T) {
 	})
 	defer cleanup()
 
-	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons", "pr")
+	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons")
 	db.client = srv.Client()
 
 	err := db.DeleteBranch("wl/alice/w-001")
@@ -470,7 +470,7 @@ func TestRemoteDB_DeleteBranch_ReturnsError(t *testing.T) {
 
 func TestRemoteDB_DeleteBranch_MainNoOp(t *testing.T) {
 	// Deleting main or empty branch should be a no-op.
-	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons", "pr")
+	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons")
 	if err := db.DeleteBranch("main"); err != nil {
 		t.Fatalf("DeleteBranch(main) error: %v", err)
 	}
@@ -535,7 +535,7 @@ func TestRemoteDB_Diff(t *testing.T) {
 	})
 	defer cleanup()
 
-	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons", "pr")
+	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons")
 	db.client = srv.Client()
 
 	diff, err := db.Diff("wl/alice/w-001")
@@ -613,7 +613,7 @@ func TestRemoteDB_Diff_FieldsWithCommas(t *testing.T) {
 	})
 	defer cleanup()
 
-	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons", "pr")
+	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons")
 	db.client = srv.Client()
 
 	diff, err := db.Diff("wl/alice/w-001")
@@ -648,7 +648,7 @@ func TestRemoteDB_Diff_NoChanges(t *testing.T) {
 	})
 	defer cleanup()
 
-	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons", "pr")
+	db := NewRemoteDB("test-token", "upstream-org", "wl-commons", "fork-org", "wl-commons")
 	db.client = srv.Client()
 
 	diff, err := db.Diff("wl/alice/w-001")

@@ -11,14 +11,22 @@ import (
 // openDB creates a commons.DB for the given local database directory.
 // Package-level variable to allow test overrides.
 var openDB = func(localDir string) commons.DB {
-	return backend.NewLocalDB(localDir, "")
+	return backend.NewLocalDB(localDir, nil)
+}
+
+// syncFnForMode returns the appropriate sync function for the given mode.
+func syncFnForMode(mode string) func(string) error {
+	if mode == federation.ModePR {
+		return backend.PRSync
+	}
+	return backend.WildWestSync
 }
 
 // openDBFromConfig creates a commons.DB using the resolved backend from config.
 // Package-level variable to allow test overrides.
 var openDBFromConfig = func(cfg *federation.Config) (commons.DB, error) {
 	if cfg.ResolveBackend() == federation.BackendLocal {
-		return backend.NewLocalDB(cfg.LocalDir, cfg.ResolveMode()), nil
+		return backend.NewLocalDB(cfg.LocalDir, syncFnForMode(cfg.ResolveMode())), nil
 	}
 	if cfg.IsGitHub() {
 		return nil, fmt.Errorf("GitHub backend requires local dolt\n\n  Install: https://docs.dolthub.com/introduction/installation\n  Then: wl join --github %s --local-db", cfg.Upstream)
@@ -31,5 +39,5 @@ var openDBFromConfig = func(cfg *federation.Config) (commons.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return backend.NewRemoteDB(token, upOrg, upDB, cfg.ForkOrg, cfg.ForkDB, cfg.ResolveMode()), nil
+	return backend.NewRemoteDB(token, upOrg, upDB, cfg.ForkOrg, cfg.ForkDB), nil
 }

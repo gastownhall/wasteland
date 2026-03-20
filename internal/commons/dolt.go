@@ -34,10 +34,10 @@ func DoltHubOrg() string {
 	return os.Getenv("DOLTHUB_ORG")
 }
 
-// PushWithSync pushes the local main branch to both upstream and origin remotes.
+// PushAllRemotes pushes the local main branch to both upstream and origin remotes.
 // If a push is rejected (stale), it pulls to merge and retries.
 // Returns an error if any remote push ultimately fails.
-func PushWithSync(dbDir string, stdout io.Writer) error {
+func PushAllRemotes(dbDir string, stdout io.Writer) error {
 	var failures []string
 	for _, remote := range []string{"upstream", "origin"} {
 		if err := pushRemote(dbDir, remote); err != nil {

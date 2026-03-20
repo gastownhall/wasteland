@@ -275,7 +275,7 @@ func runJoinRemote(stdout, _ io.Writer, upstream, handle, displayName, email, fo
 
 	// 2. Register rig via RemoteDB.Exec on a registration branch.
 	fmt.Fprintf(stdout, "  Registering rig via API...\n")
-	db := backend.NewRemoteDB(token, upstreamOrg, upstreamDB, forkOrg, upstreamDB, federation.ModePR)
+	db := backend.NewRemoteDB(token, upstreamOrg, upstreamDB, forkOrg, upstreamDB)
 	branch := fmt.Sprintf("wl/register/%s", handle)
 	regSQL := commons.BuildRegistrationSQL(handle, forkOrg, displayName, email, "dev")
 	if err := db.Exec(branch, "", false, regSQL); err != nil {

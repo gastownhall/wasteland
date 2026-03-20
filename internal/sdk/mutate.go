@@ -43,7 +43,7 @@ func (c *Client) mutateWildWest(wantedID, commitMsg string, stmts ...string) (*M
 		return nil, err
 	}
 	if !c.noPush {
-		if err := c.db.PushWithSync(io.Discard); err != nil {
+		if err := c.db.PushAllRemotes(io.Discard); err != nil {
 			return nil, err
 		}
 	}

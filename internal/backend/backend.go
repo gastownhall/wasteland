@@ -40,8 +40,8 @@ type DB interface {
 	// DeleteRemoteBranch removes a branch on the origin remote. No-op for remote.
 	DeleteRemoteBranch(branch string) error
 
-	// PushWithSync pushes to both upstream and origin with sync retry. No-op for remote.
-	PushWithSync(stdout io.Writer) error
+	// PushAllRemotes pushes to both upstream and origin with sync retry. No-op for remote.
+	PushAllRemotes(stdout io.Writer) error
 
 	// CanWildWest returns nil if the backend supports wild-west mode (direct
 	// upstream writes). Returns an error with a user-facing message if not.

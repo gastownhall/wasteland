@@ -11,14 +11,18 @@ import (
 
 // LocalDB implements DB using the local dolt CLI.
 type LocalDB struct {
-	dir  string
-	mode string // "pr" or "wild-west"
+	dir    string
+	syncFn func(dir string) error // injected sync strategy
 }
 
 // NewLocalDB creates a DB backed by a local dolt database directory.
-// mode determines Sync behavior: "pr" resets to upstream, otherwise pulls.
-func NewLocalDB(dir, mode string) *LocalDB {
-	return &LocalDB{dir: dir, mode: mode}
+// syncFn determines Sync behavior; use PRSync or WildWestSync.
+// If syncFn is nil, defaults to WildWestSync.
+func NewLocalDB(dir string, syncFn func(string) error) *LocalDB {
+	if syncFn == nil {
+		syncFn = WildWestSync
+	}
+	return &LocalDB{dir: dir, syncFn: syncFn}
 }
 
 // Dir returns the local database directory path.
@@ -88,26 +92,33 @@ func (l *LocalDB) PushMain(stdout io.Writer) error {
 	return commons.PushOriginMain(l.dir, stdout)
 }
 
-// PushWithSync pushes to both upstream and origin with sync retry.
-func (l *LocalDB) PushWithSync(stdout io.Writer) error {
-	return commons.PushWithSync(l.dir, stdout)
+// PushAllRemotes pushes to both upstream and origin with sync retry.
+func (l *LocalDB) PushAllRemotes(stdout io.Writer) error {
+	return commons.PushAllRemotes(l.dir, stdout)
 }
 
 // CanWildWest returns nil — local databases support wild-west mode.
 func (l *LocalDB) CanWildWest() error { return nil }
 
-// Sync pulls latest from upstream. In PR mode, resets main to upstream
-// and fetches origin branches so PR mutations are visible via AS OF.
+// Sync pulls latest from upstream using the injected sync strategy.
 func (l *LocalDB) Sync() error {
-	if l.mode == "pr" {
-		if err := commons.ResetMainToUpstream(l.dir); err != nil {
-			return err
-		}
-		_ = commons.FetchRemote(l.dir, "origin")
-		_ = commons.TrackOriginBranches(l.dir, "wl/")
-		return nil
+	return l.syncFn(l.dir)
+}
+
+// PRSync resets main to upstream and fetches origin branches so PR
+// mutations are visible via AS OF.
+func PRSync(dir string) error {
+	if err := commons.ResetMainToUpstream(dir); err != nil {
+		return err
 	}
-	return commons.PullUpstream(l.dir)
+	_ = commons.FetchRemote(dir, "origin")
+	_ = commons.TrackOriginBranches(dir, "wl/")
+	return nil
+}
+
+// WildWestSync pulls latest changes from the upstream remote.
+func WildWestSync(dir string) error {
+	return commons.PullUpstream(dir)
 }
 
 // MergeBranch merges a branch into main.

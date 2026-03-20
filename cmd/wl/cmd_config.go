@@ -139,6 +139,11 @@ func runConfigSet(cmd *cobra.Command, stdout, _ io.Writer, key, value string) er
 		return hintWrap(err)
 	}
 
+	// Validate mode-backend compatibility at config time.
+	if key == "mode" && value == federation.ModeWildWest && cfg.ResolveBackend() == federation.BackendRemote {
+		return fmt.Errorf("wild-west mode requires local backend; switch to local first: wl config set backend local")
+	}
+
 	switch key {
 	case "mode":
 		cfg.Mode = value

@@ -543,7 +543,7 @@ func (f *fakeDB) MergeBranch(branch string) error {
 
 func (f *fakeDB) DeleteRemoteBranch(_ string) error { return nil }
 
-func (f *fakeDB) PushWithSync(_ io.Writer) error {
+func (f *fakeDB) PushAllRemotes(_ io.Writer) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.pushCalls++

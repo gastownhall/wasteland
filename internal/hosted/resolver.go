@@ -189,7 +189,7 @@ func (wr *WorkspaceResolver) buildClient(wl *WastelandConfig, rigHandle, connect
 		mode = "pr"
 	}
 
-	db := backend.NewRemoteDB(apiKey, upOrg, upDB, wl.ForkOrg, wl.ForkDB, mode)
+	db := backend.NewRemoteDB(apiKey, upOrg, upDB, wl.ForkOrg, wl.ForkDB)
 
 	provider := remote.NewDoltHubProvider(apiKey)
 

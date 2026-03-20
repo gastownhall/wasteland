@@ -94,7 +94,7 @@ func runMerge(cmd *cobra.Command, stdout, _ io.Writer, branch string, noPush, ke
 	}
 
 	if !noPush {
-		if err := commons.PushWithSync(cfg.LocalDir, stdout); err != nil {
+		if err := commons.PushAllRemotes(cfg.LocalDir, stdout); err != nil {
 			fmt.Fprintf(stdout, "\n  %s %s\n", style.Warning.Render(style.IconWarn),
 				"Push failed — merge saved locally. Run 'wl sync' to retry.")
 		}

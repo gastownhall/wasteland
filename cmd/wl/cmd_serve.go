@@ -120,7 +120,7 @@ func runServe(cmd *cobra.Command, stdout, stderr io.Writer) error {
 		if err := requireDolt(); err != nil {
 			return err
 		}
-		localDB := backend.NewLocalDB(cfg.LocalDir, cfg.ResolveMode())
+		localDB := backend.NewLocalDB(cfg.LocalDir, syncFnForMode(cfg.ResolveMode()))
 		db = localDB
 
 		sp := style.StartSpinner(stderr, "Syncing with upstream...")
@@ -144,7 +144,7 @@ func runServe(cmd *cobra.Command, stdout, stderr io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("parsing upstream: %w", err)
 		}
-		remoteDB := backend.NewRemoteDB(token, upOrg, upDB, cfg.ForkOrg, cfg.ForkDB, cfg.ResolveMode())
+		remoteDB := backend.NewRemoteDB(token, upOrg, upDB, cfg.ForkOrg, cfg.ForkDB)
 		db = remoteDB
 
 		sp := style.StartSpinner(stderr, "Syncing fork with upstream...")
@@ -287,7 +287,7 @@ func runServeHosted(cmd *cobra.Command, stdout, _ io.Writer) error {
 	apiServer := api.NewHostedWorkspace(hosted.NewClientFunc(), hosted.NewWorkspaceFunc())
 
 	// Public read-only RemoteDB against hop/wl-commons (no token needed).
-	publicDB := backend.NewRemoteDB("", "hop", "wl-commons", "hop", "wl-commons", "")
+	publicDB := backend.NewRemoteDB("", "hop", "wl-commons", "hop", "wl-commons")
 
 	// Scoreboard cache.
 	scoreboardCache := api.NewScoreboardCache(publicDB, 5*time.Minute)

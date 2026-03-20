@@ -27,19 +27,17 @@ type RemoteDB struct {
 	readDB     string // upstream db name
 	writeOwner string // fork org
 	writeDB    string // fork db name
-	mode       string // "pr" or "wild-west"
 	client     *http.Client
 }
 
 // NewRemoteDB creates a DB backed by the DoltHub REST API.
-func NewRemoteDB(token, readOwner, readDB, writeOwner, writeDB, mode string) *RemoteDB {
+func NewRemoteDB(token, readOwner, readDB, writeOwner, writeDB string) *RemoteDB {
 	return &RemoteDB{
 		token:      token,
 		readOwner:  readOwner,
 		readDB:     readDB,
 		writeOwner: writeOwner,
 		writeDB:    writeDB,
-		mode:       mode,
 		client:     &http.Client{Timeout: 60 * time.Second},
 	}
 }
@@ -47,13 +45,12 @@ func NewRemoteDB(token, readOwner, readDB, writeOwner, writeDB, mode string) *Re
 // NewRemoteDBWithClient creates a DB backed by the DoltHub REST API using a
 // pre-configured HTTP client. The client's transport is responsible for auth
 // (e.g. Nango proxy), so no token is stored.
-func NewRemoteDBWithClient(client *http.Client, readOwner, readDB, writeOwner, writeDB, mode string) *RemoteDB {
+func NewRemoteDBWithClient(client *http.Client, readOwner, readDB, writeOwner, writeDB string) *RemoteDB {
 	return &RemoteDB{
 		readOwner:  readOwner,
 		readDB:     readDB,
 		writeOwner: writeOwner,
 		writeDB:    writeDB,
-		mode:       mode,
 		client:     client,
 	}
 }
@@ -191,8 +188,8 @@ func (r *RemoteDB) PushBranch(_ string, _ io.Writer) error { return nil }
 // PushMain is a no-op for remote.
 func (r *RemoteDB) PushMain(_ io.Writer) error { return nil }
 
-// PushWithSync is a no-op for remote — the write API auto-pushes.
-func (r *RemoteDB) PushWithSync(_ io.Writer) error { return nil }
+// PushAllRemotes is a no-op for remote — the write API auto-pushes.
+func (r *RemoteDB) PushAllRemotes(_ io.Writer) error { return nil }
 
 // CanWildWest returns an error — the DoltHub REST API cannot push from a fork
 // to the upstream, so wild-west mode is not supported.

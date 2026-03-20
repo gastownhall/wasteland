@@ -81,7 +81,7 @@ func setupLocalDB(t *testing.T) commons.DB {
 		t.Fatalf("init schema: %v", err)
 	}
 
-	return backend.NewLocalDB(dir, "wild-west")
+	return backend.NewLocalDB(dir, backend.WildWestSync)
 }
 
 // --- seeding helpers ---

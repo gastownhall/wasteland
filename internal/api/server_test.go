@@ -220,7 +220,7 @@ func (f *fakeDB) PushMain(_ io.Writer) error             { return nil }
 func (f *fakeDB) Sync() error                            { return nil }
 func (f *fakeDB) MergeBranch(_ string) error             { return nil }
 func (f *fakeDB) DeleteRemoteBranch(_ string) error      { return nil }
-func (f *fakeDB) PushWithSync(_ io.Writer) error         { return nil }
+func (f *fakeDB) PushAllRemotes(_ io.Writer) error       { return nil }
 func (f *fakeDB) CanWildWest() error                     { return nil }
 
 func (f *fakeDB) resolve(id, ref string) *fakeItem {

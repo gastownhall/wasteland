@@ -42,7 +42,7 @@ func (d *DoltHubForkRegistrar) EnsureForkAndRegister(apiKey, upstream, forkOrg, 
 
 	// 2. Register rig on a branch via the DoltHub SQL API.
 	// Write DB must be upstreamDB (fork preserves the original DB name on DoltHub).
-	db := backend.NewRemoteDB(apiKey, upstreamOrg, upstreamDB, forkOrg, upstreamDB, federation.ModePR)
+	db := backend.NewRemoteDB(apiKey, upstreamOrg, upstreamDB, forkOrg, upstreamDB)
 	branch := fmt.Sprintf("wl/register/%s", rigHandle)
 	regSQL := commons.BuildRegistrationSQL(rigHandle, forkOrg, displayName, email, "hosted")
 	// Retry with backoff — newly created forks may not be immediately available

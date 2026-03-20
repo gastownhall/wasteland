@@ -25,7 +25,7 @@ func (noopDB) PushMain(io.Writer) error                   { return nil }
 func (noopDB) Sync() error                                { return nil }
 func (noopDB) MergeBranch(string) error                   { return nil }
 func (noopDB) DeleteRemoteBranch(string) error            { return nil }
-func (noopDB) PushWithSync(io.Writer) error               { return nil }
+func (noopDB) PushAllRemotes(io.Writer) error             { return nil }
 func (noopDB) CanWildWest() error                         { return nil }
 
 // withFakeSDK overrides newSDKClient and resolveWantedArg for test isolation.

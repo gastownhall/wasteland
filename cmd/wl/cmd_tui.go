@@ -39,7 +39,7 @@ func runTUI(cmd *cobra.Command, _, stderr io.Writer) error {
 		if err := requireDolt(); err != nil {
 			return err
 		}
-		localDB := backend.NewLocalDB(cfg.LocalDir, cfg.ResolveMode())
+		localDB := backend.NewLocalDB(cfg.LocalDir, syncFnForMode(cfg.ResolveMode()))
 		db = localDB
 
 		// Sync before launching the TUI.
@@ -61,7 +61,7 @@ func runTUI(cmd *cobra.Command, _, stderr io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("parsing upstream: %w", err)
 		}
-		remoteDB := backend.NewRemoteDB(commons.DoltHubToken(), upOrg, upDB, cfg.ForkOrg, cfg.ForkDB, cfg.ResolveMode())
+		remoteDB := backend.NewRemoteDB(commons.DoltHubToken(), upOrg, upDB, cfg.ForkOrg, cfg.ForkDB)
 		db = remoteDB
 
 		sp := style.StartSpinner(stderr, "Syncing fork with upstream...")
