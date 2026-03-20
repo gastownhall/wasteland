@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommandsContext } from "../hooks/useCommands";
 import { makeBrowseResponse, makeSummary, mockFetch } from "../test-utils";
 import { BrowseList } from "./BrowseList";
@@ -84,6 +84,83 @@ describe("BrowseList", () => {
     fireEvent.keyDown(window, { key: "j" });
     fireEvent.keyDown(window, { key: "Enter" });
     await waitFor(() => expect(screen.getByTestId("detail")).toBeInTheDocument());
+  });
+
+  it("starts background polling after the initial load", async () => {
+    let pollCallback: (() => void) | null = null;
+    const hiddenSpy = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+    const setIntervalSpy = vi.spyOn(globalThis, "setInterval").mockImplementation(((
+      fn: TimerHandler,
+      delay?: number,
+    ) => {
+      if (delay === 30_000) pollCallback = fn as () => void;
+      return 1 as ReturnType<typeof setInterval>;
+    }) as typeof setInterval);
+    const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval").mockImplementation(() => {});
+    cleanupFetch = mockFetch(() =>
+      makeBrowseResponse([makeSummary({ id: "1", title: "First" }), makeSummary({ id: "2", title: "Second" })]),
+    );
+
+    try {
+      renderBrowse();
+      await waitFor(() => expect(screen.getAllByText("First").length).toBeGreaterThan(0));
+      await waitFor(() => expect(pollCallback).not.toBeNull());
+    } finally {
+      hiddenSpy.mockRestore();
+      setIntervalSpy.mockRestore();
+      clearIntervalSpy.mockRestore();
+    }
+  });
+
+  it("preserves the selected item when polling reorders results", async () => {
+    let fetchCount = 0;
+    let pollCallback: (() => void) | null = null;
+    const hiddenSpy = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+    const setIntervalSpy = vi.spyOn(globalThis, "setInterval").mockImplementation(((
+      fn: TimerHandler,
+      delay?: number,
+    ) => {
+      if (delay === 30_000) pollCallback = fn as () => void;
+      return 1 as ReturnType<typeof setInterval>;
+    }) as typeof setInterval);
+    const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval").mockImplementation(() => {});
+    cleanupFetch = mockFetch(() => {
+      fetchCount += 1;
+      return fetchCount === 1
+        ? makeBrowseResponse([
+            makeSummary({ id: "1", title: "Alpha" }),
+            makeSummary({ id: "2", title: "Bravo" }),
+            makeSummary({ id: "3", title: "Charlie" }),
+          ])
+        : makeBrowseResponse([
+            makeSummary({ id: "3", title: "Charlie" }),
+            makeSummary({ id: "1", title: "Alpha" }),
+            makeSummary({ id: "2", title: "Bravo" }),
+          ]);
+    });
+
+    try {
+      renderBrowse();
+      await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0));
+      await waitFor(() => expect(pollCallback).not.toBeNull());
+
+      fireEvent.keyDown(window, { key: "j" });
+      fireEvent.keyDown(window, { key: "j" });
+      expect(screen.getAllByRole("row")[2]).toHaveAttribute("data-selected", "true");
+
+      await act(async () => {
+        pollCallback?.();
+      });
+      await waitFor(() => expect(fetchCount).toBe(2));
+
+      const selectedRow = screen.getAllByRole("row")[3];
+      expect(selectedRow).toHaveAttribute("data-selected", "true");
+      expect(selectedRow).toHaveTextContent("Bravo");
+    } finally {
+      hiddenSpy.mockRestore();
+      setIntervalSpy.mockRestore();
+      clearIntervalSpy.mockRestore();
+    }
   });
 
   it("c opens WantedForm", async () => {

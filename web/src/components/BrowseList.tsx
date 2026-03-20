@@ -6,6 +6,7 @@ import { consumePrefetch } from "../api/prefetch";
 import type { PendingItemSummary, WantedSummary } from "../api/types";
 import { useFilterParams } from "../hooks/useFilterParams";
 import styles from "./BrowseList.module.css";
+import { findSelectedIndex, resolveSelectedIdAfterRefresh } from "./browseSelection";
 import { EmptyState } from "./EmptyState";
 import { FilterBar } from "./FilterBar";
 import { PriorityBadge } from "./PriorityBadge";
@@ -22,14 +23,16 @@ export function BrowseList() {
   const [warning, setWarning] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [showInferForm, setShowInferForm] = useState(false);
-  const [selectedIndex, setSelectedIndex] = useState(-1);
-  const selectedIndexRef = useRef(-1);
+  const [pollingEnabled, setPollingEnabled] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedIdRef = useRef<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const hasLoadedRef = useRef(false);
+  const selectedIndex = findSelectedIndex(items, selectedId);
 
-  const setSelection = useCallback((next: number) => {
-    selectedIndexRef.current = next;
-    setSelectedIndex(next);
+  const setSelection = useCallback((next: string | null) => {
+    selectedIdRef.current = next;
+    setSelectedId(next);
   }, []);
 
   const load = useCallback(async () => {
@@ -42,8 +45,9 @@ export function BrowseList() {
       const resp = (prefetched && (await prefetched)) || (await browse(filter));
       setItems(resp.items);
       if (resp.warning) setWarning(resp.warning);
-      setSelection(-1);
+      setSelection(null);
       hasLoadedRef.current = true;
+      setPollingEnabled(true);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to load";
       setError(msg);
@@ -59,18 +63,18 @@ export function BrowseList() {
 
   // Silent background poll — no loading spinner, no error toasts.
   useEffect(() => {
-    if (!hasLoadedRef.current) return;
+    if (!pollingEnabled) return;
     const id = setInterval(() => {
       if (document.hidden) return;
       browse(filter)
         .then((resp) => {
           setItems(resp.items);
-          setSelection(-1);
+          setSelection(resolveSelectedIdAfterRefresh(selectedIdRef.current, resp.items));
         })
         .catch(() => {});
     }, 30_000);
     return () => clearInterval(id);
-  }, [filter, setSelection]);
+  }, [filter, pollingEnabled, setSelection]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -82,17 +86,19 @@ export function BrowseList() {
         case "j": {
           e.preventDefault();
           if (items.length === 0) break;
-          setSelection(Math.min(selectedIndexRef.current + 1, items.length - 1));
+          const nextIndex = Math.min(findSelectedIndex(items, selectedIdRef.current) + 1, items.length - 1);
+          setSelection(items[nextIndex]?.id ?? null);
           break;
         }
         case "k": {
           e.preventDefault();
           if (items.length === 0) break;
-          setSelection(Math.max(selectedIndexRef.current - 1, 0));
+          const nextIndex = Math.max(findSelectedIndex(items, selectedIdRef.current) - 1, 0);
+          setSelection(items[nextIndex]?.id ?? null);
           break;
         }
         case "Enter": {
-          const index = selectedIndexRef.current;
+          const index = findSelectedIndex(items, selectedIdRef.current);
           if (index >= 0 && index < items.length) {
             startTransition(() => navigate(`/wanted/${items[index].id}`));
           }
