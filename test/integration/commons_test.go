@@ -301,7 +301,7 @@ func TestCommonsData_MetaVersion(t *testing.T) {
 	}
 
 	version := rows[1][0]
-	if version != "1.1" {
-		t.Errorf("schema_version = %q, want %q", version, "1.1")
+	if version != "1.2" {
+		t.Errorf("schema_version = %q, want %q", version, "1.2")
 	}
 }

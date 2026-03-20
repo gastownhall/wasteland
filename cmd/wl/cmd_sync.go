@@ -5,6 +5,8 @@ import (
 	"io"
 	"os/exec"
 
+	"github.com/gastownhall/wasteland/internal/backend"
+	"github.com/gastownhall/wasteland/internal/commons"
 	"github.com/gastownhall/wasteland/internal/federation"
 	"github.com/gastownhall/wasteland/internal/style"
 	"github.com/spf13/cobra"
@@ -12,6 +14,7 @@ import (
 
 func newSyncCmd(stdout, stderr io.Writer) *cobra.Command {
 	var dryRun bool
+	var upgrade bool
 
 	cmd := &cobra.Command{
 		Use:   "sync",
@@ -22,20 +25,26 @@ func newSyncCmd(stdout, stderr io.Writer) *cobra.Command {
 If you have a local fork of wl-commons (created by wl join), this pulls
 the latest changes from upstream.
 
+Schema version changes are detected automatically:
+  - MINOR version bumps (e.g. 1.1 → 1.2) are applied automatically
+  - MAJOR version bumps (e.g. 1.x → 2.x) require --upgrade to proceed
+
 EXAMPLES:
   wl sync                # Pull upstream changes
-  wl sync --dry-run      # Show what would change`,
+  wl sync --dry-run      # Show what would change
+  wl sync --upgrade      # Allow major schema version upgrades`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runSync(cmd, stdout, stderr, dryRun)
+			return runSync(cmd, stdout, stderr, dryRun, upgrade)
 		},
 	}
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would change without pulling")
+	cmd.Flags().BoolVar(&upgrade, "upgrade", false, "Allow major schema version upgrades")
 
 	return cmd
 }
 
-func runSync(cmd *cobra.Command, stdout, stderr io.Writer, dryRun bool) error {
+func runSync(cmd *cobra.Command, stdout, stderr io.Writer, dryRun, upgrade bool) error {
 	cfg, err := resolveWasteland(cmd)
 	if err != nil {
 		return hintWrap(err)
@@ -60,21 +69,27 @@ func runSync(cmd *cobra.Command, stdout, stderr io.Writer, dryRun bool) error {
 
 	fmt.Fprintf(stdout, "Local fork: %s\n", style.Dim.Render(forkDir))
 
+	// Fetch upstream before version check (non-destructive).
+	fetchCmd := exec.Command(doltPath, "fetch", "upstream")
+	fetchCmd.Dir = forkDir
+	fetchCmd.Stderr = stderr
+	if err := fetchCmd.Run(); err != nil {
+		return fmt.Errorf("fetching upstream: %w", err)
+	}
+
+	// Check schema versions.
+	db := backend.NewLocalDB(forkDir, cfg.Mode)
+	versionMsg, err := checkSchemaVersion(db, stdout, upgrade, dryRun)
+	if err != nil {
+		return err
+	}
+
 	if dryRun {
 		fmt.Fprintf(stdout, "\n%s Dry run — checking upstream for changes...\n", style.Bold.Render("~"))
-
-		fetchCmd := exec.Command(doltPath, "fetch", "upstream")
-		fetchCmd.Dir = forkDir
-		fetchCmd.Stderr = stderr
-		if err := fetchCmd.Run(); err != nil {
-			return fmt.Errorf("fetching upstream: %w", err)
-		}
 
 		diffCmd := exec.Command(doltPath, "diff", "--stat", "HEAD", "upstream/main")
 		diffCmd.Dir = forkDir
 		diffCmd.Stderr = stderr
-		// dolt diff exits non-zero when differences exist, so ignore the
-		// error when stdout captured output (meaning changes were found).
 		diffOut, _ := diffCmd.Output()
 		if len(diffOut) > 0 {
 			fmt.Fprint(stdout, string(diffOut))
@@ -95,6 +110,9 @@ func runSync(cmd *cobra.Command, stdout, stderr io.Writer, dryRun bool) error {
 	}
 
 	fmt.Fprintf(stdout, "\n%s Synced with upstream\n", style.Bold.Render("✓"))
+	if versionMsg != "" {
+		fmt.Fprintf(stdout, "  %s\n", versionMsg)
+	}
 	updateSyncTimestamp(cfg)
 
 	// Show summary
@@ -119,4 +137,55 @@ func runSync(cmd *cobra.Command, stdout, stderr io.Writer, dryRun bool) error {
 	}
 
 	return nil
+}
+
+// checkSchemaVersion compares local and upstream schema versions and returns
+// a message to display after sync. Returns an error if a MAJOR bump is
+// detected and neither --upgrade nor --dry-run was passed.
+// In dry-run mode, major bumps produce a warning but don't block.
+func checkSchemaVersion(db commons.DB, stdout io.Writer, upgrade, dryRun bool) (string, error) {
+	localVer, err := commons.ReadSchemaVersion(db, "")
+	if err != nil {
+		// Non-fatal: if we can't read the version, proceed with sync.
+		return "", nil
+	}
+
+	upstreamVer, err := commons.ReadSchemaVersion(db, "upstream/main")
+	if err != nil {
+		return "", nil
+	}
+
+	// If either version is missing, proceed without gating.
+	if localVer.IsZero() || upstreamVer.IsZero() {
+		return "", nil
+	}
+
+	delta := commons.CompareVersions(localVer, upstreamVer)
+
+	switch delta {
+	case commons.VersionSame:
+		return "", nil
+
+	case commons.VersionMinor:
+		return fmt.Sprintf("Schema updated: %s → %s (backwards-compatible)", localVer, upstreamVer), nil
+
+	case commons.VersionMajor:
+		if upgrade {
+			return fmt.Sprintf("Schema upgraded: %s → %s (major version)", localVer, upstreamVer), nil
+		}
+		fmt.Fprintf(stdout, "\n  %s Schema upgrade required: %s → %s\n\n",
+			style.Warning.Render(style.IconWarn), localVer, upstreamVer)
+		fmt.Fprintf(stdout, "  This is a MAJOR version change that may affect your local data.\n")
+		fmt.Fprintf(stdout, "  Review the changelog before upgrading.\n\n")
+		fmt.Fprintf(stdout, "  To proceed: wl sync --upgrade\n")
+		if dryRun {
+			return fmt.Sprintf("Schema upgrade required: %s → %s (major version)", localVer, upstreamVer), nil
+		}
+		return "", fmt.Errorf("major schema upgrade required (use --upgrade to proceed)")
+
+	case commons.VersionAhead:
+		return fmt.Sprintf("Note: local schema (%s) is ahead of upstream (%s)", localVer, upstreamVer), nil
+	}
+
+	return "", nil
 }

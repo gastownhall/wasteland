@@ -312,7 +312,13 @@ completing.
 ```bash
 wl sync              # pull upstream changes into your fork
 wl sync --dry-run    # preview what would change
+wl sync --upgrade    # allow major schema version upgrades
 ```
+
+Schema version changes are detected automatically during sync:
+
+- **MINOR** bumps (e.g. 1.1 → 1.2) are applied automatically
+- **MAJOR** bumps (e.g. 1.x → 2.x) are blocked until you pass `--upgrade`
 
 ## Diagnostics
 
@@ -497,7 +503,7 @@ and the SPA from a single process with no external dependencies.
 | `wl update <id>` | Update an open item | `--title`, `--priority`, `--effort`, `--type`, `--tags`, `--project` |
 | `wl unclaim <id>` | Release back to open | `--no-push` |
 | `wl delete <id>` | Withdraw an open item | `--no-push` |
-| `wl sync` | Pull upstream into fork | `--dry-run` |
+| `wl sync` | Pull upstream into fork | `--dry-run`, `--upgrade` |
 | `wl review [branch]` | List or diff PR-mode branches | `--stat`, `--md`, `--json`, `--create-pr` |
 | `wl approve <branch>` | Approve a PR-mode branch | `--comment` |
 | `wl request-changes <branch>` | Request changes on a branch | `--comment` (required) |
