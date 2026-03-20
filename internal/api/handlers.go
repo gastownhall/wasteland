@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gastownhall/wasteland/internal/commons"
+	"github.com/gastownhall/wasteland/internal/federation"
 	"github.com/gastownhall/wasteland/internal/sdk"
 	"github.com/getsentry/sentry-go"
 )
@@ -659,7 +660,7 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
-	if req.Mode != "wild-west" && req.Mode != "pr" {
+	if req.Mode == "" || federation.ValidateMode(req.Mode) != nil {
 		writeError(w, http.StatusBadRequest, "mode must be \"wild-west\" or \"pr\"")
 		return
 	}

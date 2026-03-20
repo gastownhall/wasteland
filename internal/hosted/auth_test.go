@@ -434,6 +434,37 @@ func TestHandleConnect_MissingFields(t *testing.T) {
 	}
 }
 
+func TestHandleConnect_InvalidMode(t *testing.T) {
+	_, ts := setupHostedTestServer(t)
+
+	body := `{
+		"connection_id": "conn-1",
+		"rig_handle": "alice",
+		"fork_org": "alice-org",
+		"fork_db": "wl-commons",
+		"upstream": "wasteland/wl-commons",
+		"mode": "typo"
+	}`
+	resp, err := http.Post(ts.URL+"/api/auth/connect", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck // test cleanup
+
+	if resp.StatusCode != http.StatusBadRequest {
+		respBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 400, got %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if result["error"] != `mode "typo" must be "pr" or "wild-west"` {
+		t.Fatalf("expected invalid mode error, got %q", result["error"])
+	}
+}
+
 func TestHandleAuthStatus_NotAuthenticated(t *testing.T) {
 	_, ts := setupHostedTestServer(t)
 
@@ -610,6 +641,44 @@ func TestHandleJoinWasteland_MissingFields(t *testing.T) {
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestHandleJoinWasteland_InvalidMode(t *testing.T) {
+	sessions, ts := setupHostedTestServer(t)
+
+	sessionID, _ := sessions.Create("conn-1")
+
+	body := `{
+		"fork_org": "alice-org",
+		"fork_db": "gascity",
+		"upstream": "gastownhall/gascity",
+		"mode": "typo"
+	}`
+	req, _ := http.NewRequest("POST", ts.URL+"/api/auth/join", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{
+		Name:  cookieName,
+		Value: SignSessionCookie(sessionID, "conn-1", testSecret),
+	})
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck // test cleanup
+
+	if resp.StatusCode != http.StatusBadRequest {
+		respBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 400, got %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if result["error"] != `mode "typo" must be "pr" or "wild-west"` {
+		t.Fatalf("expected invalid mode error, got %q", result["error"])
 	}
 }
 

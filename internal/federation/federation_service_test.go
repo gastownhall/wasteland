@@ -218,12 +218,45 @@ func TestJoin_ConfigLoadError(t *testing.T) {
 	svc := &Service{Remote: provider, CLI: cli, Config: cfgStore}
 
 	_, err := svc.Join("steveyegge/wl-commons", "alice-dev", "alice-rig", "Alice", "alice@example.com", "dev", false, false)
-	if err != nil {
-		t.Fatalf("Join() error: %v (expected success since LoadErr only affects Load)", err)
+	if err == nil {
+		t.Fatal("Join() expected error when config load fails")
 	}
-	// Fork should have been called.
-	if !strings.HasPrefix(provider.Calls[0], "Fork") {
-		t.Errorf("expected first provider call to be Fork, got %q", provider.Calls[0])
+	if !strings.Contains(err.Error(), "loading wasteland config") {
+		t.Fatalf("Join() error = %v", err)
+	}
+	if len(provider.Calls) != 0 {
+		t.Errorf("expected no provider calls when config load fails, got %d", len(provider.Calls))
+	}
+	if len(cli.Calls) != 0 {
+		t.Errorf("expected no CLI calls when config load fails, got %d", len(cli.Calls))
+	}
+}
+
+func TestCreate_ConfigLoadError(t *testing.T) {
+	t.Parallel()
+	provider := NewFakeProvider()
+	cli := NewFakeDoltCLI()
+	cfgStore := NewFakeConfigStore()
+	cfgStore.LoadErr = fmt.Errorf("permission denied")
+
+	svc := &Service{Remote: provider, CLI: cli, Config: cfgStore}
+
+	_, err := svc.Create(CreateOptions{
+		Upstream:  "myorg/wl-commons",
+		Handle:    "myrig",
+		SchemaSQL: "CREATE TABLE test (id INT PRIMARY KEY);",
+	})
+	if err == nil {
+		t.Fatal("Create() expected error when config load fails")
+	}
+	if !strings.Contains(err.Error(), "loading wasteland config") {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if len(provider.Calls) != 0 {
+		t.Errorf("expected no provider calls when config load fails, got %d", len(provider.Calls))
+	}
+	if len(cli.Calls) != 0 {
+		t.Errorf("expected no CLI calls when config load fails, got %d", len(cli.Calls))
 	}
 }
 

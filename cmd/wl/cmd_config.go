@@ -174,10 +174,11 @@ func validateSigning(value string) error {
 }
 
 func validateMode(value string) error {
-	switch value {
-	case federation.ModeWildWest, federation.ModePR:
-		return nil
-	default:
+	if value == "" {
 		return fmt.Errorf("invalid mode %q: must be %q or %q", value, federation.ModeWildWest, federation.ModePR)
 	}
+	if err := federation.ValidateMode(value); err != nil {
+		return fmt.Errorf("invalid mode %q: must be %q or %q", value, federation.ModeWildWest, federation.ModePR)
+	}
+	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -234,6 +235,46 @@ func TestWorkspaceResolver_NoConfig(t *testing.T) {
 	_, err := resolver.Resolve(session)
 	if err == nil {
 		t.Fatal("expected error for missing config")
+	}
+}
+
+func TestWorkspaceResolver_InvalidMode(t *testing.T) {
+	meta := &UserMetadata{
+		RigHandle: "alice",
+		Wastelands: []WastelandConfig{
+			{Upstream: "wasteland/wl-commons", ForkOrg: "alice-org", ForkDB: "wl-commons", Mode: "typo"},
+		},
+	}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		resp := nangoConnectionResponse{ConnectionID: "conn-1"}
+		resp.Credentials.APIKey = "token"
+		b, _ := json.Marshal(meta)
+		resp.Metadata = json.RawMessage(b)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	nango := NewNangoClient(NangoConfig{
+		BaseURL:       ts.URL,
+		SecretKey:     "secret",
+		IntegrationID: "dolthub",
+	})
+	sessions := NewSessionStore()
+	resolver := NewWorkspaceResolver(nango, sessions)
+
+	session := &UserSession{
+		ID:           "sess-1",
+		ConnectionID: "conn-1",
+		CreatedAt:    time.Now(),
+	}
+
+	_, err := resolver.Resolve(session)
+	if err == nil {
+		t.Fatal("expected error for invalid mode")
+	}
+	if !strings.Contains(err.Error(), `invalid hosted wasteland config: mode "typo" must be "pr" or "wild-west"`) {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

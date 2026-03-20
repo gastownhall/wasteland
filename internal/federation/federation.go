@@ -89,6 +89,17 @@ func (c *Config) ResolveMode() string {
 	return c.Mode
 }
 
+// ValidateMode validates a workflow mode value.
+// Empty mode is allowed because PR mode is the default when mode is unset.
+func ValidateMode(mode string) error {
+	switch mode {
+	case "", ModePR, ModeWildWest:
+		return nil
+	default:
+		return fmt.Errorf("mode %q must be %q or %q", mode, ModePR, ModeWildWest)
+	}
+}
+
 // Backend constants.
 const (
 	BackendRemote = "remote"
@@ -233,6 +244,8 @@ func (s *Service) Join(upstream, forkOrg, handle, displayName, ownerEmail, versi
 	// Check if already joined to this specific upstream (idempotent).
 	if existing, err := s.Config.Load(upstream); err == nil {
 		return &JoinResult{Config: existing}, nil
+	} else if !errors.Is(err, ErrNotJoined) {
+		return nil, fmt.Errorf("loading wasteland config: %w", err)
 	}
 
 	localDir := LocalCloneDir(upstreamOrg, upstreamDB)
@@ -358,6 +371,8 @@ func (s *Service) Create(opts CreateOptions) (*CreateResult, error) {
 	// Idempotent: if config already exists, return early.
 	if existing, err := s.Config.Load(opts.Upstream); err == nil {
 		return &CreateResult{Config: existing}, nil
+	} else if !errors.Is(err, ErrNotJoined) {
+		return nil, fmt.Errorf("loading wasteland config: %w", err)
 	}
 
 	localDir := LocalCloneDir(org, db)
@@ -734,10 +749,16 @@ func (f *fileConfigStore) Load(upstream string) (*Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing wasteland config: %w", err)
 	}
+	if err := ValidateMode(cfg.Mode); err != nil {
+		return nil, fmt.Errorf("invalid wasteland config: %w", err)
+	}
 	return &cfg, nil
 }
 
 func (f *fileConfigStore) Save(cfg *Config) error {
+	if err := ValidateMode(cfg.Mode); err != nil {
+		return fmt.Errorf("invalid wasteland config: %w", err)
+	}
 	path, err := f.configPath(cfg.Upstream)
 	if err != nil {
 		return err

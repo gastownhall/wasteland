@@ -111,6 +111,8 @@ func runJoin(stdout, stderr io.Writer, upstream, handle, displayName, email, for
 		fmt.Fprintf(stdout, "  Fork: %s/%s\n", existing.ForkOrg, existing.ForkDB)
 		fmt.Fprintf(stdout, "  Local: %s\n", existing.LocalDir)
 		return nil
+	} else if !errors.Is(loadErr, federation.ErrNotJoined) {
+		return fmt.Errorf("loading wasteland config: %w", loadErr)
 	}
 
 	// Resolve fork org: flag > env var
@@ -228,6 +230,8 @@ func runJoinRemote(stdout, _ io.Writer, upstream, handle, displayName, email, fo
 		fmt.Fprintf(stdout, "  Fork: %s/%s\n", existing.ForkOrg, existing.ForkDB)
 		fmt.Fprintf(stdout, "  Backend: %s\n", existing.ResolveBackend())
 		return nil
+	} else if !errors.Is(loadErr, federation.ErrNotJoined) {
+		return fmt.Errorf("loading wasteland config: %w", loadErr)
 	}
 
 	// Resolve fork org: flag > env var

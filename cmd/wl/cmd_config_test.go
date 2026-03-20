@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -110,6 +112,28 @@ func TestRunConfigGet_ModeDefault(t *testing.T) {
 	}
 	if got := strings.TrimSpace(stdout.String()); got != "pr" {
 		t.Errorf("runConfigGet(mode default) = %q, want %q", got, "pr")
+	}
+}
+
+func TestRunConfigGet_ModeInvalidConfig(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	cfgPath := filepath.Join(configHome, "wasteland", "wastelands", "hop", "wl-commons.json")
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	data := []byte("{\n  \"upstream\": \"hop/wl-commons\",\n  \"fork_org\": \"alice\",\n  \"fork_db\": \"wl-commons\",\n  \"mode\": \"typo\",\n  \"joined_at\": \"2026-03-09T00:00:00Z\"\n}\n")
+	if err := os.WriteFile(cfgPath, data, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runConfigGet(configCmd(), &stdout, &stderr, "mode")
+	if err == nil {
+		t.Fatal("runConfigGet(mode) expected error for invalid config")
+	}
+	if !strings.Contains(err.Error(), `invalid wasteland config: mode "typo" must be "pr" or "wild-west"`) {
+		t.Fatalf("runConfigGet(mode) error = %v", err)
 	}
 }
 

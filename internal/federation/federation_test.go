@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -98,6 +99,48 @@ func TestConfigLoadNotFound(t *testing.T) {
 	_, err := store.Load("nonexistent/db")
 	if err == nil {
 		t.Error("Load expected error for missing config")
+	}
+}
+
+func TestConfigLoadInvalidMode(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	path := filepath.Join(tmpDir, "wasteland", "wastelands", "org", "db.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	data := []byte("{\n  \"upstream\": \"org/db\",\n  \"fork_org\": \"fork\",\n  \"fork_db\": \"db\",\n  \"mode\": \"typo\"\n}\n")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	store := NewConfigStore()
+	_, err := store.Load("org/db")
+	if err == nil {
+		t.Fatal("Load expected error for invalid mode")
+	}
+	if !strings.Contains(err.Error(), `invalid wasteland config: mode "typo" must be "pr" or "wild-west"`) {
+		t.Fatalf("Load error = %q", err)
+	}
+}
+
+func TestConfigSaveInvalidMode(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	store := NewConfigStore()
+	err := store.Save(&Config{
+		Upstream: "org/db",
+		ForkOrg:  "fork",
+		ForkDB:   "db",
+		Mode:     "typo",
+	})
+	if err == nil {
+		t.Fatal("Save expected error for invalid mode")
+	}
+	if !strings.Contains(err.Error(), `invalid wasteland config: mode "typo" must be "pr" or "wild-west"`) {
+		t.Fatalf("Save error = %q", err)
 	}
 }
 
@@ -321,6 +364,7 @@ func TestResolveMode(t *testing.T) {
 		{"empty defaults to pr", "", ModePR},
 		{"explicit pr", ModePR, ModePR},
 		{"explicit wild-west", ModeWildWest, ModeWildWest},
+		{"invalid returned as-is", "typo", "typo"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

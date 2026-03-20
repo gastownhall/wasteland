@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gastownhall/wasteland/internal/api"
+	"github.com/gastownhall/wasteland/internal/federation"
 	"github.com/gastownhall/wasteland/internal/sdk"
 	"github.com/getsentry/sentry-go"
 )
@@ -98,10 +99,14 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if err := federation.ValidateMode(req.Mode); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
 
 	mode := req.Mode
 	if mode == "" {
-		mode = "pr"
+		mode = federation.ModePR
 	}
 
 	// Read-modify-write: preserve existing wastelands, upsert the new one.
@@ -302,10 +307,14 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if err := federation.ValidateMode(req.Mode); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
 
 	mode := req.Mode
 	if mode == "" {
-		mode = "pr"
+		mode = federation.ModePR
 	}
 
 	// Fetch current metadata, upsert the new wasteland, write back.

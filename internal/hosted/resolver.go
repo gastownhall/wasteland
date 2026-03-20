@@ -183,10 +183,13 @@ func (wr *WorkspaceResolver) buildClient(wl *WastelandConfig, rigHandle, connect
 	if err != nil {
 		return nil, fmt.Errorf("parsing upstream %q: %w", wl.Upstream, err)
 	}
+	if err := federation.ValidateMode(wl.Mode); err != nil {
+		return nil, fmt.Errorf("invalid hosted wasteland config: %w", err)
+	}
 
 	mode := wl.Mode
 	if mode == "" {
-		mode = "pr"
+		mode = federation.ModePR
 	}
 
 	db := backend.NewRemoteDB(apiKey, upOrg, upDB, wl.ForkOrg, wl.ForkDB, mode)
