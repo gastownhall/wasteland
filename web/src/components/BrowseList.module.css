@@ -107,11 +107,6 @@
   cursor: default;
 }
 
-.pendingIndicator:hover .pendingCard,
-.pendingIndicator:focus-within .pendingCard {
-  display: block;
-}
-
 .pendingCard {
   display: none;
   position: absolute;
@@ -131,6 +126,11 @@
   text-transform: none;
   white-space: nowrap;
   color: var(--fg);
+}
+
+.pendingIndicator:hover .pendingCard,
+.pendingIndicator:focus-within .pendingCard {
+  display: block;
 }
 
 .pendingCardTitle {

@@ -10,6 +10,7 @@ import { ProfileSearch } from "./components/ProfileSearch";
 import { ProfileView } from "./components/ProfileView";
 import { Scoreboard } from "./components/Scoreboard";
 import { Settings } from "./components/Settings";
+import { SkillView } from "./components/SkillView";
 import { WastelandProvider } from "./context/WastelandContext";
 
 const MARKETPLACE_URL =
@@ -35,6 +36,7 @@ export function App() {
               <Route path="/profile" element={<ProfileSearch />} />
               <Route path="/profile/:handle" element={<ProfileView />} />
               <Route path="/scoreboard" element={<Scoreboard />} />
+              <Route path="/skill" element={<SkillView />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/connect" element={<ConnectPage />} />
               <Route path="/join" element={<ConnectPage />} />
