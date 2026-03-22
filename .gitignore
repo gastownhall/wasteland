@@ -9,3 +9,10 @@ web/dist/*
 web/coverage/
 web/*.tsbuildinfo
 docs/production-checklist.md
+
+# Gas Town (added by gt)
+.runtime/
+.claude/
+.logs/
+__pycache__/
+.beads/
