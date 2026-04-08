@@ -1,3 +1,6 @@
+.beads/
+.claude/
+.runtime/
 CLAUDE.local.md
 coverage.txt
 /bin/
