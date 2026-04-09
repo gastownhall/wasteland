@@ -5,6 +5,15 @@ import (
 	"github.com/gastownhall/wasteland/internal/sdk"
 )
 
+func allowsPendingSubmissionState(status string) bool {
+	switch status {
+	case "open", "claimed", "in_review":
+		return true
+	default:
+		return false
+	}
+}
+
 // --- Response types ---
 
 // PendingItemJSON is a summary of a pending upstream PR for browse list hover cards.
@@ -370,6 +379,9 @@ func toDetailResponse(d *sdk.DetailResult, mode string) *DetailResponse {
 	}
 
 	itemJSON := toWantedItemJSON(d.Item)
+	if itemJSON != nil && !allowsPendingSubmissionState(itemJSON.Status) {
+		upstreamPRs = nil
+	}
 	// If there are competing upstream submissions, overlay claimed_by to
 	// reflect the full set of candidates (main claimer + upstream PRs).
 	if itemJSON != nil && len(upstreamPRs) > 0 {

@@ -1244,6 +1244,115 @@ func TestBrowse_DefaultViewShowsPendingForVisibleItems(t *testing.T) {
 	}
 }
 
+func TestBrowse_TerminalItemSuppressesUpstreamPending(t *testing.T) {
+	db := newFakeDB()
+	db.seedItem(fakeItem{
+		ID:          "w-1",
+		Title:       "Done task",
+		Project:     "gascity",
+		Type:        "bug",
+		Priority:    1,
+		PostedBy:    "alice",
+		ClaimedBy:   "winner",
+		Status:      "completed",
+		EffortLevel: "small",
+	})
+
+	c := New(ClientConfig{
+		DB:        db,
+		RigHandle: "alice",
+		Mode:      "wild-west",
+		ListPendingItems: func() (map[string][]PendingItem, error) {
+			return map[string][]PendingItem{
+				"w-1": {{
+					RigHandle: "bob",
+					Status:    "in_review",
+					ClaimedBy: "bob",
+					Branch:    "wl/bob/w-1",
+					PRURL:     "https://example.com/pr/1",
+				}},
+			}, nil
+		},
+	})
+
+	result, err := c.Browse(commons.BrowseFilter{Priority: -1})
+	if err != nil {
+		t.Fatalf("Browse: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(result.Items))
+	}
+	if result.Items[0].ClaimedBy != "winner" {
+		t.Fatalf("claimed_by = %q, want winner", result.Items[0].ClaimedBy)
+	}
+	if result.PendingIDs["w-1"] != 0 {
+		t.Fatalf("pending count = %d, want 0", result.PendingIDs["w-1"])
+	}
+	if len(result.UpstreamPending["w-1"]) != 0 {
+		t.Fatalf("upstream pending = %+v, want empty", result.UpstreamPending["w-1"])
+	}
+}
+
+func TestBrowse_TerminalMainDoesNotAddPendingOnlyItem(t *testing.T) {
+	db := &laggyBranchDB{fakeDB: newFakeDB()}
+	db.seedItem(fakeItem{
+		ID:          "w-1",
+		Title:       "Done task",
+		Project:     "gascity",
+		Type:        "bug",
+		Priority:    1,
+		PostedBy:    "alice",
+		ClaimedBy:   "winner",
+		Status:      "completed",
+		EffortLevel: "small",
+	})
+	db.branches["wl/bob/w-1"] = true
+	db.branchItems["wl/bob/w-1"] = map[string]*fakeItem{
+		"w-1": {
+			ID:          "w-1",
+			Title:       "Done task",
+			Project:     "gascity",
+			Type:        "bug",
+			Priority:    1,
+			PostedBy:    "alice",
+			ClaimedBy:   "bob",
+			Status:      "claimed",
+			EffortLevel: "small",
+		},
+	}
+
+	c := New(ClientConfig{
+		DB:        db,
+		RigHandle: "bob",
+		Mode:      "pr",
+		ListPendingItems: func() (map[string][]PendingItem, error) {
+			return map[string][]PendingItem{
+				"w-1": {{
+					RigHandle: "bob",
+					Status:    "claimed",
+					ClaimedBy: "bob",
+					Branch:    "wl/bob/w-1",
+					PRURL:     "https://example.com/pr/1",
+				}},
+			}, nil
+		},
+	})
+
+	result, err := c.Browse(commons.BrowseFilter{View: "all", Status: "claimed", Priority: -1})
+	if err != nil {
+		t.Fatalf("Browse: %v", err)
+	}
+	if len(result.Items) != 0 {
+		t.Fatalf("items = %+v, want no stale pending-only overlay rows", result.Items)
+	}
+	if result.PendingIDs["w-1"] != 0 {
+		t.Fatalf("pending count = %d, want 0", result.PendingIDs["w-1"])
+	}
+	if len(result.UpstreamPending["w-1"]) != 0 {
+		t.Fatalf("upstream pending = %+v, want empty", result.UpstreamPending["w-1"])
+	}
+}
+
 func TestDetail_UpstreamPRs(t *testing.T) {
 	db := newFakeDB()
 	db.seedItem(fakeItem{ID: "w-1", Title: "Fix bug", Status: "open", Priority: 1, PostedBy: "alice", EffortLevel: "medium"})
@@ -1313,6 +1422,96 @@ func TestDetail_UpstreamPRs_WithEvidence(t *testing.T) {
 	}
 	if pr.Evidence != "https://github.com/charlie/evidence" {
 		t.Errorf("expected Evidence, got %q", pr.Evidence)
+	}
+}
+
+func TestDetail_WildWestCompletedItemSuppressesUpstreamPRs(t *testing.T) {
+	db := newFakeDB()
+	db.seedItem(fakeItem{
+		ID:          "w-1",
+		Title:       "Done task",
+		Status:      "completed",
+		ClaimedBy:   "winner",
+		Priority:    1,
+		PostedBy:    "alice",
+		EffortLevel: "medium",
+	})
+
+	c := New(ClientConfig{
+		DB:        db,
+		RigHandle: "bob",
+		Mode:      "wild-west",
+		ListPendingItems: func() (map[string][]PendingItem, error) {
+			return map[string][]PendingItem{
+				"w-1": {{
+					RigHandle: "charlie",
+					Status:    "in_review",
+					ClaimedBy: "charlie",
+					Branch:    "wl/charlie/w-1",
+					PRURL:     "https://example.com/pr/1",
+				}},
+			}, nil
+		},
+	})
+
+	result, err := c.Detail("w-1")
+	if err != nil {
+		t.Fatalf("Detail: %v", err)
+	}
+	if len(result.UpstreamPRs) != 0 {
+		t.Fatalf("upstream PRs = %+v, want none for completed item", result.UpstreamPRs)
+	}
+}
+
+func TestDetail_PRModeCompletedMainSuppressesUpstreamPRs(t *testing.T) {
+	db := newFakeDB()
+	db.seedItem(fakeItem{
+		ID:          "w-1",
+		Title:       "Done task",
+		Status:      "completed",
+		ClaimedBy:   "winner",
+		Priority:    1,
+		PostedBy:    "alice",
+		EffortLevel: "medium",
+	})
+	db.branches["wl/bob/w-1"] = true
+	db.branchItems["wl/bob/w-1"] = map[string]*fakeItem{
+		"w-1": {
+			ID:          "w-1",
+			Title:       "Done task",
+			Status:      "open",
+			Priority:    1,
+			PostedBy:    "alice",
+			EffortLevel: "medium",
+		},
+	}
+
+	c := New(ClientConfig{
+		DB:        db,
+		RigHandle: "bob",
+		Mode:      "pr",
+		ListPendingItems: func() (map[string][]PendingItem, error) {
+			return map[string][]PendingItem{
+				"w-1": {{
+					RigHandle: "charlie",
+					Status:    "in_review",
+					ClaimedBy: "charlie",
+					Branch:    "wl/charlie/w-1",
+					PRURL:     "https://example.com/pr/1",
+				}},
+			}, nil
+		},
+	})
+
+	result, err := c.Detail("w-1")
+	if err != nil {
+		t.Fatalf("Detail: %v", err)
+	}
+	if result.Item == nil || result.Item.Status != "open" {
+		t.Fatalf("effective item = %+v, want branch overlay open state", result.Item)
+	}
+	if len(result.UpstreamPRs) != 0 {
+		t.Fatalf("upstream PRs = %+v, want none once main is completed", result.UpstreamPRs)
 	}
 }
 

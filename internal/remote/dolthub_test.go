@@ -551,6 +551,343 @@ func TestDoltHubProvider_FindPR_Pagination(t *testing.T) {
 	}
 }
 
+func TestDoltHubProvider_FindPR_SkipsBadDetailAndKeepsSearching(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/org/db/pulls", func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/pulls/") {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"pulls": []map[string]any{
+				{"pull_id": "1", "state": "open"},
+				{"pull_id": "2", "state": "open"},
+			},
+		})
+	})
+	mux.HandleFunc("/org/db/pulls/1", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("boom"))
+	})
+	mux.HandleFunc("/org/db/pulls/2", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"from_branch":       "wl/bob/w-002",
+			"from_branch_owner": "bob",
+			"author":            "bob",
+		})
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	oldAPIBase, oldRepoBase := dolthubAPIBase, dolthubRepoBase
+	dolthubAPIBase = server.URL
+	dolthubRepoBase = server.URL + "/repositories"
+	defer func() {
+		dolthubAPIBase = oldAPIBase
+		dolthubRepoBase = oldRepoBase
+	}()
+
+	provider := NewDoltHubProvider("token")
+	url, id := provider.FindPR("org", "db", "bob", "wl/bob/w-002")
+	if id != "2" || url == "" {
+		t.Fatalf("FindPR() = (%q, %q), want PR 2", url, id)
+	}
+}
+
+func TestDoltHubProvider_FindPR_UsesCachedIndex(t *testing.T) {
+	var listCalls atomic.Int32
+	var detailCalls atomic.Int32
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/org/db/pulls", func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/pulls/") {
+			return
+		}
+		listCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"pulls": []map[string]any{
+				{"pull_id": "1", "state": "open"},
+				{"pull_id": "2", "state": "open"},
+			},
+		})
+	})
+	mux.HandleFunc("/org/db/pulls/1", func(w http.ResponseWriter, _ *http.Request) {
+		detailCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"from_branch":       "wl/alice/w-001",
+			"from_branch_owner": "alice",
+			"author":            "alice",
+		})
+	})
+	mux.HandleFunc("/org/db/pulls/2", func(w http.ResponseWriter, _ *http.Request) {
+		detailCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"from_branch":       "wl/bob/w-002",
+			"from_branch_owner": "bob",
+			"author":            "bob",
+		})
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	oldAPIBase, oldRepoBase := dolthubAPIBase, dolthubRepoBase
+	dolthubAPIBase = server.URL
+	dolthubRepoBase = server.URL + "/repositories"
+	defer func() {
+		dolthubAPIBase = oldAPIBase
+		dolthubRepoBase = oldRepoBase
+	}()
+
+	provider := NewDoltHubProvider("token")
+	if _, id := provider.FindPR("org", "db", "alice", "wl/alice/w-001"); id != "1" {
+		t.Fatalf("first FindPR() id = %q, want 1", id)
+	}
+	if _, id := provider.FindPR("org", "db", "bob", "wl/bob/w-002"); id != "2" {
+		t.Fatalf("second FindPR() id = %q, want 2", id)
+	}
+	if _, id := provider.FindPR("org", "db", "alice", "wl/alice/w-001"); id != "1" {
+		t.Fatalf("cached FindPR() id = %q, want 1", id)
+	}
+	if got := listCalls.Load(); got != 1 {
+		t.Fatalf("pull list calls = %d, want 1", got)
+	}
+	if got := detailCalls.Load(); got != 2 {
+		t.Fatalf("pull detail calls = %d, want 2", got)
+	}
+}
+
+func TestDoltHubProvider_FindPR_DuplicateBranchUsesFirstPRAndAvoidsAmbiguousBranchCache(t *testing.T) {
+	var listCalls atomic.Int32
+	var detailCalls atomic.Int32
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/org/db/pulls", func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/pulls/") {
+			return
+		}
+		listCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"pulls": []map[string]any{
+				{"pull_id": "1", "state": "open"},
+				{"pull_id": "2", "state": "open"},
+			},
+		})
+	})
+	for _, pullID := range []string{"1", "2"} {
+		mux.HandleFunc("/org/db/pulls/"+pullID, func(w http.ResponseWriter, _ *http.Request) {
+			detailCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"from_branch":       "wl/bob/w-002",
+				"from_branch_owner": "bob",
+				"author":            "bob",
+			})
+		})
+	}
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	oldAPIBase, oldRepoBase := dolthubAPIBase, dolthubRepoBase
+	dolthubAPIBase = server.URL
+	dolthubRepoBase = server.URL + "/repositories"
+	defer func() {
+		dolthubAPIBase = oldAPIBase
+		dolthubRepoBase = oldRepoBase
+	}()
+
+	provider := NewDoltHubProvider("token")
+	firstURL, firstID := provider.FindPR("org", "db", "bob", "wl/bob/w-002")
+	secondURL, secondID := provider.FindPR("org", "db", "bob", "wl/bob/w-002")
+	if firstID != "1" || secondID != "1" {
+		t.Fatalf("FindPR() duplicate branch ids = (%q, %q), want both 1", firstID, secondID)
+	}
+	if firstURL == "" || secondURL == "" {
+		t.Fatal("expected non-empty PR URLs for duplicate-branch lookup")
+	}
+	if got := listCalls.Load(); got != 1 {
+		t.Fatalf("pull list calls = %d, want 1", got)
+	}
+	if got := detailCalls.Load(); got != 2 {
+		t.Fatalf("pull detail calls = %d, want 2", got)
+	}
+}
+
+func TestDoltHubProvider_CreatePR_PrimesFindPRCache(t *testing.T) {
+	var listCalls atomic.Int32
+	var detailCalls atomic.Int32
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/org/db/pulls/77", func(w http.ResponseWriter, _ *http.Request) {
+		detailCalls.Add(1)
+		t.Fatal("FindPR() should use the create-path cache without reading PR detail")
+	})
+	mux.HandleFunc("/org/db/pulls", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			listCalls.Add(1)
+			t.Fatal("unexpected non-POST pull request")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"_id": "77",
+		})
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	oldAPIBase, oldRepoBase := dolthubAPIBase, dolthubRepoBase
+	dolthubAPIBase = server.URL
+	dolthubRepoBase = server.URL + "/repositories"
+	defer func() {
+		dolthubAPIBase = oldAPIBase
+		dolthubRepoBase = oldRepoBase
+	}()
+
+	provider := NewDoltHubProvider("token")
+	prURL, err := provider.CreatePR("alice", "org", "db", "wl/alice/w-003", "title", "body")
+	if err != nil {
+		t.Fatalf("CreatePR() error = %v", err)
+	}
+	if !strings.Contains(prURL, "/pulls/77") {
+		t.Fatalf("CreatePR() url = %q, want /pulls/77", prURL)
+	}
+	if _, id := provider.FindPR("org", "db", "alice", "wl/alice/w-003"); id != "77" {
+		t.Fatalf("FindPR() id = %q, want 77", id)
+	}
+	if got := listCalls.Load(); got != 0 {
+		t.Fatalf("pull list calls = %d, want 0", got)
+	}
+	if got := detailCalls.Load(); got != 0 {
+		t.Fatalf("pull detail calls = %d, want 0", got)
+	}
+}
+
+func TestDoltHubProvider_ClosePR_InvalidatesFindPRCache(t *testing.T) {
+	var listCalls atomic.Int32
+	var detailCalls atomic.Int32
+	open := true
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/org/db/pulls", func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/pulls/") {
+			return
+		}
+		listCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		pulls := []map[string]any{}
+		if open {
+			pulls = append(pulls, map[string]any{"pull_id": "1", "state": "open"})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"pulls": pulls})
+	})
+	mux.HandleFunc("/org/db/pulls/1", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPatch {
+			open = false
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		detailCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"from_branch":       "wl/alice/w-001",
+			"from_branch_owner": "alice",
+			"author":            "alice",
+		})
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	oldAPIBase, oldRepoBase := dolthubAPIBase, dolthubRepoBase
+	dolthubAPIBase = server.URL
+	dolthubRepoBase = server.URL + "/repositories"
+	defer func() {
+		dolthubAPIBase = oldAPIBase
+		dolthubRepoBase = oldRepoBase
+	}()
+
+	provider := NewDoltHubProvider("token")
+	if _, id := provider.FindPR("org", "db", "alice", "wl/alice/w-001"); id != "1" {
+		t.Fatalf("warm FindPR() id = %q, want 1", id)
+	}
+	if err := provider.ClosePR("org", "db", "1"); err != nil {
+		t.Fatalf("ClosePR() error = %v", err)
+	}
+	if url, id := provider.FindPR("org", "db", "alice", "wl/alice/w-001"); url != "" || id != "" {
+		t.Fatalf("FindPR() after close = (%q, %q), want empty", url, id)
+	}
+	if got := listCalls.Load(); got != 2 {
+		t.Fatalf("pull list calls = %d, want 2", got)
+	}
+	if got := detailCalls.Load(); got != 1 {
+		t.Fatalf("pull detail calls = %d, want 1", got)
+	}
+}
+
+func TestDoltHubProvider_FindPR_CacheExpiresAfterExternalClose(t *testing.T) {
+	var listCalls atomic.Int32
+	var detailCalls atomic.Int32
+	open := true
+
+	oldTTL := prCacheTTL
+	prCacheTTL = 20 * time.Millisecond
+	defer func() { prCacheTTL = oldTTL }()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/org/db/pulls", func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/pulls/") {
+			return
+		}
+		listCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		pulls := []map[string]any{}
+		if open {
+			pulls = append(pulls, map[string]any{"pull_id": "1", "state": "open"})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"pulls": pulls})
+	})
+	mux.HandleFunc("/org/db/pulls/1", func(w http.ResponseWriter, _ *http.Request) {
+		detailCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"from_branch":       "wl/alice/w-001",
+			"from_branch_owner": "alice",
+			"author":            "alice",
+		})
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	oldAPIBase, oldRepoBase := dolthubAPIBase, dolthubRepoBase
+	dolthubAPIBase = server.URL
+	dolthubRepoBase = server.URL + "/repositories"
+	defer func() {
+		dolthubAPIBase = oldAPIBase
+		dolthubRepoBase = oldRepoBase
+	}()
+
+	provider := NewDoltHubProvider("token")
+	if _, id := provider.FindPR("org", "db", "alice", "wl/alice/w-001"); id != "1" {
+		t.Fatalf("warm FindPR() id = %q, want 1", id)
+	}
+
+	open = false
+	time.Sleep(3 * prCacheTTL)
+
+	if url, id := provider.FindPR("org", "db", "alice", "wl/alice/w-001"); url != "" || id != "" {
+		t.Fatalf("FindPR() after external close = (%q, %q), want empty", url, id)
+	}
+	if got := listCalls.Load(); got != 2 {
+		t.Fatalf("pull list calls = %d, want 2 after cache expiry", got)
+	}
+	if got := detailCalls.Load(); got != 1 {
+		t.Fatalf("pull detail calls = %d, want 1", got)
+	}
+}
+
 func TestDoltHubProvider_ListPendingWantedIDs(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/upstream-org/wl-commons/pulls", func(w http.ResponseWriter, r *http.Request) {
@@ -662,6 +999,153 @@ func TestDoltHubProvider_ListPendingWantedIDs(t *testing.T) {
 	}
 	if pending := ids["fix-login"]; len(pending) != 1 || pending[0].BranchURL == "" {
 		t.Error("expected non-empty BranchURL for fix-login")
+	}
+}
+
+func TestDoltHubProvider_ListPendingWantedIDs_BatchesCompletionQueriesPerBranch(t *testing.T) {
+	mux := http.NewServeMux()
+	var completionCalls atomic.Int32
+	var diffCalls atomic.Int32
+
+	mux.HandleFunc("/org/db/pulls", func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/pulls/") {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"pulls": []map[string]any{{"pull_id": "1", "state": "open"}},
+		})
+	})
+	mux.HandleFunc("/org/db/pulls/1", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"from_branch":       "wl/bob/review",
+			"from_branch_owner": "bob-fork",
+			"author":            "bob",
+		})
+	})
+	mux.HandleFunc("/bob-fork/db/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		q := r.URL.Query().Get("q")
+		if strings.Contains(q, "FROM completions") {
+			completionCalls.Add(1)
+			if !strings.Contains(q, "'w-001'") || !strings.Contains(q, "'w-002'") {
+				t.Fatalf("batched completions query missing wanted IDs: %s", q)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"rows": []map[string]string{
+					{"wanted_id": "w-001", "completed_by": "bob", "evidence": "https://example.com/1"},
+					{"wanted_id": "w-002", "completed_by": "bob", "evidence": "https://example.com/2"},
+				},
+			})
+			return
+		}
+		diffCalls.Add(1)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"rows": []map[string]string{
+				{"id": "w-001", "status": "in_review", "claimed_by": "bob", "diff_type": "modified"},
+				{"id": "w-002", "status": "completed", "claimed_by": "bob", "diff_type": "modified"},
+			},
+		})
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	oldAPIBase, oldRepoBase := dolthubAPIBase, dolthubRepoBase
+	dolthubAPIBase = server.URL
+	dolthubRepoBase = server.URL + "/repositories"
+	defer func() {
+		dolthubAPIBase = oldAPIBase
+		dolthubRepoBase = oldRepoBase
+	}()
+
+	provider := NewDoltHubProvider("token")
+	ids, err := provider.ListPendingWantedIDs("org", "db")
+	if err != nil {
+		t.Fatalf("ListPendingWantedIDs() error: %v", err)
+	}
+	if got := diffCalls.Load(); got != 1 {
+		t.Fatalf("diff query count = %d, want 1", got)
+	}
+	if got := completionCalls.Load(); got != 1 {
+		t.Fatalf("completion query count = %d, want 1", got)
+	}
+	if pending := ids["w-001"]; len(pending) != 1 || pending[0].CompletedBy != "bob" || pending[0].Evidence != "https://example.com/1" {
+		t.Fatalf("w-001 pending = %+v, want batched completion data", pending)
+	}
+	if pending := ids["w-002"]; len(pending) != 1 || pending[0].CompletedBy != "bob" || pending[0].Evidence != "https://example.com/2" {
+		t.Fatalf("w-002 pending = %+v, want batched completion data", pending)
+	}
+}
+
+func TestDoltHubProvider_ListPendingWantedIDs_DeduplicatesBranchQueriesForDuplicatePRs(t *testing.T) {
+	mux := http.NewServeMux()
+	var diffCalls atomic.Int32
+
+	mux.HandleFunc("/org/db/pulls", func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/pulls/") {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"pulls": []map[string]any{
+				{"pull_id": "1", "state": "open"},
+				{"pull_id": "2", "state": "open"},
+			},
+		})
+	})
+	for _, pullID := range []string{"1", "2"} {
+		mux.HandleFunc("/org/db/pulls/"+pullID, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"from_branch":       "wl/bob/w-001",
+				"from_branch_owner": "bob-fork",
+				"author":            "bob",
+			})
+		})
+	}
+	mux.HandleFunc("/bob-fork/db/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Query().Get("q"), "FROM completions") {
+			_ = json.NewEncoder(w).Encode(map[string]any{"rows": []map[string]string{}})
+			return
+		}
+		diffCalls.Add(1)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"rows": []map[string]string{
+				{"id": "w-001", "status": "claimed", "claimed_by": "bob", "diff_type": "modified"},
+			},
+		})
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	oldAPIBase, oldRepoBase := dolthubAPIBase, dolthubRepoBase
+	dolthubAPIBase = server.URL
+	dolthubRepoBase = server.URL + "/repositories"
+	defer func() {
+		dolthubAPIBase = oldAPIBase
+		dolthubRepoBase = oldRepoBase
+	}()
+
+	provider := NewDoltHubProvider("token")
+	ids, err := provider.ListPendingWantedIDs("org", "db")
+	if err != nil {
+		t.Fatalf("ListPendingWantedIDs() error: %v", err)
+	}
+	if got := diffCalls.Load(); got != 1 {
+		t.Fatalf("diff query count = %d, want 1", got)
+	}
+	pending := ids["w-001"]
+	if len(pending) != 2 {
+		t.Fatalf("expected 2 pending states for duplicate PRs, got %+v", pending)
+	}
+	prURLs := map[string]bool{}
+	for _, state := range pending {
+		prURLs[state.PRURL] = true
+	}
+	if len(prURLs) != 2 {
+		t.Fatalf("expected distinct PR URLs for duplicate PRs, got %+v", pending)
 	}
 }
 
@@ -1029,6 +1513,76 @@ func TestDoltHubProvider_ListPendingWantedIDs_CompletionQueryFails_GracefulDegra
 	}
 	if pending[0].Evidence != "" {
 		t.Errorf("expected empty Evidence on failure, got %q", pending[0].Evidence)
+	}
+}
+
+func TestDoltHubProvider_ListPendingWantedIDs_BatchedCompletionFailure_GracefulDegradation(t *testing.T) {
+	mux := http.NewServeMux()
+	var completionCalls atomic.Int32
+
+	mux.HandleFunc("/org/db/pulls", func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/pulls/") {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"pulls": []map[string]any{{"pull_id": "1", "state": "open"}},
+		})
+	})
+	mux.HandleFunc("/org/db/pulls/1", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"from_branch":       "wl/alice/review",
+			"from_branch_owner": "alice-fork",
+			"author":            "alice",
+		})
+	})
+	mux.HandleFunc("/alice-fork/db/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		q := r.URL.Query().Get("q")
+		if strings.Contains(q, "FROM completions") {
+			completionCalls.Add(1)
+			if !strings.Contains(q, "'w-001'") || !strings.Contains(q, "'w-002'") {
+				t.Fatalf("batched completions query missing wanted IDs: %s", q)
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte("internal error"))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"rows": []map[string]string{
+				{"id": "w-001", "status": "in_review", "claimed_by": "alice", "diff_type": "modified"},
+				{"id": "w-002", "status": "completed", "claimed_by": "alice", "diff_type": "modified"},
+			},
+		})
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	oldAPIBase, oldRepoBase := dolthubAPIBase, dolthubRepoBase
+	dolthubAPIBase = server.URL
+	dolthubRepoBase = server.URL + "/repositories"
+	defer func() {
+		dolthubAPIBase = oldAPIBase
+		dolthubRepoBase = oldRepoBase
+	}()
+
+	provider := NewDoltHubProvider("token")
+	ids, err := provider.ListPendingWantedIDs("org", "db")
+	if err != nil {
+		t.Fatalf("ListPendingWantedIDs() error: %v", err)
+	}
+	if got := completionCalls.Load(); got == 0 {
+		t.Fatal("expected at least one batched completion query attempt")
+	}
+	for _, wantedID := range []string{"w-001", "w-002"} {
+		pending := ids[wantedID]
+		if len(pending) != 1 {
+			t.Fatalf("%s entries = %+v, want 1", wantedID, pending)
+		}
+		if pending[0].CompletedBy != "" || pending[0].Evidence != "" {
+			t.Fatalf("%s completion fields = %+v, want graceful degradation", wantedID, pending[0])
+		}
 	}
 }
 

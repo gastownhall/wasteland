@@ -31,6 +31,15 @@ var stateRank = map[string]int{
 
 var sdkTracer = otel.Tracer("github.com/gastownhall/wasteland/internal/sdk")
 
+func allowsUpstreamPending(status string) bool {
+	switch status {
+	case "open", "claimed", "in_review":
+		return true
+	default:
+		return false
+	}
+}
+
 type dbContextBinder interface {
 	WithContext(ctx context.Context) commons.DB
 }
@@ -125,6 +134,23 @@ func (c *Client) BrowseContext(ctx context.Context, filter commons.BrowseFilter)
 	}
 
 	seen := make(map[string]bool, len(items))
+	filteredUpstreamItems := make(map[string][]PendingItem)
+	pendingVisibility := make(map[string]bool)
+	pendingAllowed := func(id, fallbackStatus string) (bool, error) {
+		if allowed, ok := pendingVisibility[id]; ok {
+			return allowed, nil
+		}
+		status, found, err := commons.QueryItemStatus(bindDBContext(ctx, c.db), id, "")
+		if err != nil {
+			return false, err
+		}
+		if !found {
+			status = fallbackStatus
+		}
+		allowed := allowsUpstreamPending(status)
+		pendingVisibility[id] = allowed
+		return allowed, nil
+	}
 	// Overlay furthest upstream state onto items.
 	for i := range items {
 		seen[items[i].ID] = true
@@ -132,6 +158,15 @@ func (c *Client) BrowseContext(ctx context.Context, filter commons.BrowseFilter)
 		if len(pending) == 0 {
 			continue
 		}
+		allowed, err := pendingAllowed(items[i].ID, items[i].Status)
+		if err != nil {
+			span.RecordError(err)
+			return nil, err
+		}
+		if !allowed {
+			continue
+		}
+		filteredUpstreamItems[items[i].ID] = pending
 		pendingIDs[items[i].ID] += len(pending)
 		overlayPendingClaimedBy(&items[i], pending)
 	}
@@ -142,9 +177,17 @@ func (c *Client) BrowseContext(ctx context.Context, filter commons.BrowseFilter)
 		if seen[id] || len(pending) == 0 {
 			continue
 		}
-		pendingIDs[id] += len(pending)
 		best := bestPendingState(pending)
 		if best.Branch == "" {
+			continue
+		}
+		allowed, err := pendingAllowed(id, best.Status)
+		if err != nil {
+			overlaySpan.RecordError(err)
+			span.RecordError(err)
+			return nil, err
+		}
+		if !allowed {
 			continue
 		}
 		item, err := c.loadPendingBrowseItemContext(overlayCtx, id, best)
@@ -159,6 +202,8 @@ func (c *Client) BrowseContext(ctx context.Context, filter commons.BrowseFilter)
 		if !matchesPendingBrowseFilter(item, best.Status, best.ClaimedBy, filter) {
 			continue
 		}
+		filteredUpstreamItems[id] = upstreamItems[id]
+		pendingIDs[id] += len(pending)
 		summary := commons.WantedSummary{
 			ID:          item.ID,
 			Title:       item.Title,
@@ -176,7 +221,7 @@ func (c *Client) BrowseContext(ctx context.Context, filter commons.BrowseFilter)
 	}
 	overlaySpan.SetAttributes(attribute.Int("branch_only_items", len(items)-len(seen)))
 
-	return &BrowseResult{Items: items, PendingIDs: pendingIDs, UpstreamPending: upstreamItems}, nil
+	return &BrowseResult{Items: items, PendingIDs: pendingIDs, UpstreamPending: filteredUpstreamItems}, nil
 }
 
 func filterPendingItemsForRig(items map[string][]PendingItem, rigHandle string) map[string][]PendingItem {
@@ -291,20 +336,23 @@ func (c *Client) detailPRContext(ctx context.Context, wantedID string) (*DetailR
 	}
 	effective := state.Effective()
 	pendingReadIncomplete := false
-	upstreamPRs, err := c.fetchUpstreamPRsContext(ctx, wantedID)
-	if err != nil {
-		trace.SpanFromContext(ctx).RecordError(err)
-		// Pending-only lookups must fail closed so branch-only items do not
-		// silently disappear behind incomplete pending state.
-		if effective == nil {
-			return nil, err
+	var upstreamPRs []PendingItem
+	if shouldFetchUpstreamPRs(state, effective) {
+		upstreamPRs, err = c.fetchUpstreamPRsContext(ctx, wantedID)
+		if err != nil {
+			trace.SpanFromContext(ctx).RecordError(err)
+			// Pending-only lookups must fail closed so branch-only items do not
+			// silently disappear behind incomplete pending state.
+			if effective == nil {
+				return nil, err
+			}
+			// Pending PR metadata is decorative once we already have an effective item.
+			if !c.allowBestEffortPendingRead(ctx, err) {
+				return nil, err
+			}
+			upstreamPRs = nil
+			pendingReadIncomplete = effective != nil
 		}
-		// Pending PR metadata is decorative once we already have an effective item.
-		if !c.allowBestEffortPendingRead(ctx, err) {
-			return nil, err
-		}
-		upstreamPRs = nil
-		pendingReadIncomplete = effective != nil
 	}
 	if effective == nil {
 		if len(upstreamPRs) > 0 {
@@ -431,6 +479,9 @@ func (c *Client) detailWildWestContext(ctx context.Context, wantedID string) (*D
 		Stamp:      stamp,
 		Actions:    commons.AvailableTransitions(item, c.rigHandle),
 	}
+	if !allowsUpstreamPending(item.Status) {
+		return result, nil
+	}
 	upstreamPRs, err := c.fetchUpstreamPRsContext(ctx, wantedID)
 	if err != nil {
 		span.RecordError(err)
@@ -443,6 +494,16 @@ func (c *Client) detailWildWestContext(ctx context.Context, wantedID string) (*D
 	result.UpstreamPRs = upstreamPRs
 	result.Actions = c.withUpstreamSubmissionActions(result.Item, result.UpstreamPRs, result.Actions)
 	return result, nil
+}
+
+func shouldFetchUpstreamPRs(state *commons.ItemState, effective *commons.WantedItem) bool {
+	if state != nil && state.Main != nil {
+		return allowsUpstreamPending(state.Main.Status)
+	}
+	if effective != nil {
+		return allowsUpstreamPending(effective.Status)
+	}
+	return true
 }
 
 func (c *Client) fetchUpstreamPRsContext(ctx context.Context, wantedID string) ([]PendingItem, error) {

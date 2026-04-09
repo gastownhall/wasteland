@@ -259,6 +259,7 @@ func (wr *AuthServiceWorkspaceResolver) buildClient(
 
 	db := backend.NewRemoteDBWithClient(proxyClient, upOrg, upDB, wl.ForkOrg, wl.ForkDB, mode)
 	provider := remote.NewDoltHubProviderWithClient(proxyClient)
+	pendingCache := wr.getOrCreatePendingCache(session.ConnectionID, provider, upOrg, upDB)
 
 	branchURL := func(branch string) string {
 		return fmt.Sprintf("https://www.dolthub.com/repositories/%s/%s/data/%s",
@@ -322,9 +323,9 @@ func (wr *AuthServiceWorkspaceResolver) buildClient(
 			}
 			return provider.ClosePR(upOrg, upDB, prID)
 		},
-		ListPendingItems: wr.getOrCreatePendingCache(session.ConnectionID, provider, upOrg, upDB).Get,
+		ListPendingItems: pendingCache.Get,
 		ListPendingItemsContext: func(ctx context.Context) (map[string][]sdk.PendingItem, error) {
-			return wr.getOrCreatePendingCache(session.ConnectionID, provider, upOrg, upDB).GetContext(ctx)
+			return pendingCache.GetContext(ctx)
 		},
 		BranchURL: branchURL,
 		Signing:   wl.Signing,

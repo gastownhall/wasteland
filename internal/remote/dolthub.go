@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -52,17 +53,18 @@ type DoltHubProvider struct {
 	token      string
 	httpClient *http.Client // optional; if set, used instead of creating new clients
 	ctx        context.Context
+	cache      *doltHubProviderCache
 }
 
 // NewDoltHubProvider creates a DoltHubProvider with the given API token.
 func NewDoltHubProvider(token string) *DoltHubProvider {
-	return &DoltHubProvider{token: token}
+	return &DoltHubProvider{token: token, cache: newDoltHubProviderCache()}
 }
 
 // NewDoltHubProviderWithClient creates a DoltHubProvider using a pre-configured
 // HTTP client whose transport handles auth (e.g. Nango proxy).
 func NewDoltHubProviderWithClient(client *http.Client) *DoltHubProvider {
-	return &DoltHubProvider{httpClient: observability.WrapClient(client)}
+	return &DoltHubProvider{httpClient: observability.WrapClient(client), cache: newDoltHubProviderCache()}
 }
 
 // WithContext returns a shallow copy that binds outbound HTTP calls to ctx.
@@ -86,6 +88,132 @@ func (d *DoltHubProvider) requestContext() context.Context {
 		return d.ctx
 	}
 	return context.Background()
+}
+
+// PR lookups are short-lived optimizations for bursty UI reads; keep the TTL
+// tight so externally closed/opened PRs become visible quickly.
+var prCacheTTL = 2 * time.Second
+
+type prInfo struct {
+	pullID          string
+	fromBranch      string
+	fromBranchOwner string
+	author          string
+}
+
+type cachedPRLookup struct {
+	url       string
+	id        string
+	expiresAt time.Time
+}
+
+type cachedPRIndex struct {
+	prs       []prInfo
+	expiresAt time.Time
+}
+
+type doltHubProviderCache struct {
+	mu         sync.RWMutex
+	prByBranch map[string]cachedPRLookup
+	prIndexes  map[string]cachedPRIndex
+}
+
+func newDoltHubProviderCache() *doltHubProviderCache {
+	return &doltHubProviderCache{
+		prByBranch: make(map[string]cachedPRLookup),
+		prIndexes:  make(map[string]cachedPRIndex),
+	}
+}
+
+func prBranchCacheKey(upstreamOrg, db, forkOrg, fromBranch string) string {
+	return upstreamOrg + "/" + db + ":" + forkOrg + ":" + fromBranch
+}
+
+func prIndexCacheKey(upstreamOrg, db string) string {
+	return upstreamOrg + "/" + db
+}
+
+func (d *DoltHubProvider) cachedPRLookup(upstreamOrg, db, forkOrg, fromBranch string) (cachedPRLookup, bool) {
+	if d.cache == nil {
+		return cachedPRLookup{}, false
+	}
+	key := prBranchCacheKey(upstreamOrg, db, forkOrg, fromBranch)
+	now := time.Now()
+	d.cache.mu.RLock()
+	entry, ok := d.cache.prByBranch[key]
+	d.cache.mu.RUnlock()
+	if !ok || now.After(entry.expiresAt) {
+		return cachedPRLookup{}, false
+	}
+	return entry, true
+}
+
+func (d *DoltHubProvider) rememberPRLookup(upstreamOrg, db, forkOrg, fromBranch, pullID string) {
+	if d.cache == nil || forkOrg == "" || fromBranch == "" || pullID == "" {
+		return
+	}
+	key := prBranchCacheKey(upstreamOrg, db, forkOrg, fromBranch)
+	entry := cachedPRLookup{
+		url:       fmt.Sprintf("%s/%s/%s/pulls/%s", dolthubRepoBase, upstreamOrg, db, pullID),
+		id:        pullID,
+		expiresAt: time.Now().Add(prCacheTTL),
+	}
+	d.cache.mu.Lock()
+	d.cache.prByBranch[key] = entry
+	d.cache.mu.Unlock()
+}
+
+func (d *DoltHubProvider) cachedPRIndex(upstreamOrg, db string) ([]prInfo, bool) {
+	if d.cache == nil {
+		return nil, false
+	}
+	key := prIndexCacheKey(upstreamOrg, db)
+	now := time.Now()
+	d.cache.mu.RLock()
+	entry, ok := d.cache.prIndexes[key]
+	d.cache.mu.RUnlock()
+	if !ok || now.After(entry.expiresAt) {
+		return nil, false
+	}
+	prs := make([]prInfo, len(entry.prs))
+	copy(prs, entry.prs)
+	return prs, true
+}
+
+func (d *DoltHubProvider) rememberPRIndex(upstreamOrg, db string, prs []prInfo) {
+	if d.cache == nil {
+		return
+	}
+	key := prIndexCacheKey(upstreamOrg, db)
+	clone := make([]prInfo, len(prs))
+	copy(clone, prs)
+	expiresAt := time.Now().Add(prCacheTTL)
+	branchCounts := make(map[string]int, len(prs))
+	for _, pr := range prs {
+		if pr.fromBranchOwner == "" || pr.fromBranch == "" || pr.pullID == "" {
+			continue
+		}
+		branchCounts[prBranchCacheKey(upstreamOrg, db, pr.fromBranchOwner, pr.fromBranch)]++
+	}
+
+	d.cache.mu.Lock()
+	d.cache.prIndexes[key] = cachedPRIndex{prs: clone, expiresAt: expiresAt}
+	for _, pr := range prs {
+		if pr.fromBranchOwner == "" || pr.fromBranch == "" || pr.pullID == "" {
+			continue
+		}
+		branchKey := prBranchCacheKey(upstreamOrg, db, pr.fromBranchOwner, pr.fromBranch)
+		if branchCounts[branchKey] != 1 {
+			delete(d.cache.prByBranch, branchKey)
+			continue
+		}
+		d.cache.prByBranch[branchKey] = cachedPRLookup{
+			url:       fmt.Sprintf("%s/%s/%s/pulls/%s", dolthubRepoBase, upstreamOrg, db, pr.pullID),
+			id:        pr.pullID,
+			expiresAt: expiresAt,
+		}
+	}
+	d.cache.mu.Unlock()
 }
 
 // ForkRequiredError is returned when the user needs to manually fork on DoltHub.
@@ -426,10 +554,13 @@ func (d *DoltHubProvider) CreatePR(forkOrg, upstreamOrg, db, fromBranch, title, 
 		ID     string `json:"_id"`
 	}
 	if err := json.Unmarshal(respBody, &prResp); err == nil && prResp.ID != "" {
+		d.invalidatePRRepoCaches(upstreamOrg, db)
+		d.rememberPRLookup(upstreamOrg, db, forkOrg, fromBranch, prResp.ID)
 		return fmt.Sprintf("%s/%s/%s/pulls/%s", dolthubRepoBase, upstreamOrg, db, prResp.ID), nil
 	}
 
 	// Fallback: return the pulls page URL.
+	d.invalidatePRRepoCaches(upstreamOrg, db)
 	return fmt.Sprintf("%s/%s/%s/pulls", dolthubRepoBase, upstreamOrg, db), nil
 }
 
@@ -465,37 +596,112 @@ func (d *DoltHubProvider) listPulls(upstreamOrg, db string) ([]pullSummary, erro
 	return all, nil
 }
 
+func (d *DoltHubProvider) listOpenPRDetails(upstreamOrg, db string, allowCached, failOnDetailError bool) ([]prInfo, error) {
+	if allowCached {
+		if prs, ok := d.cachedPRIndex(upstreamOrg, db); ok {
+			return prs, nil
+		}
+	}
+	pulls, err := d.listPulls(upstreamOrg, db)
+	if err != nil {
+		return nil, err
+	}
+
+	var openPulls []pullSummary
+	for _, pr := range pulls {
+		if strings.EqualFold(pr.State, "open") {
+			openPulls = append(openPulls, pr)
+		}
+	}
+	if len(openPulls) == 0 {
+		d.rememberPRIndex(upstreamOrg, db, nil)
+		return nil, nil
+	}
+
+	const maxConcurrency = 10
+	type detailResult struct {
+		info prInfo
+		err  error
+	}
+	detailCh := make(chan detailResult, len(openPulls))
+	var detailWG sync.WaitGroup
+	sem := make(chan struct{}, maxConcurrency)
+
+	for _, pr := range openPulls {
+		detailWG.Add(1)
+		go func(pullID string) {
+			defer detailWG.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			detailURL := fmt.Sprintf("%s/%s/%s/pulls/%s", dolthubAPIBase, upstreamOrg, db, pullID)
+			detail, err := d.dolthubGet(detailURL)
+			if err != nil {
+				detailCh <- detailResult{err: fmt.Errorf("reading PR %s detail: %w", pullID, err)}
+				return
+			}
+			var prDetail struct {
+				FromBranch      string `json:"from_branch"`
+				FromBranchOwner string `json:"from_branch_owner"`
+				Author          string `json:"author"`
+			}
+			if err := json.Unmarshal(detail, &prDetail); err != nil {
+				detailCh <- detailResult{err: fmt.Errorf("decoding PR %s detail: %w", pullID, err)}
+				return
+			}
+			detailCh <- detailResult{
+				info: prInfo{
+					pullID:          pullID,
+					fromBranch:      prDetail.FromBranch,
+					fromBranchOwner: prDetail.FromBranchOwner,
+					author:          prDetail.Author,
+				},
+			}
+		}(pr.PullID)
+	}
+
+	detailWG.Wait()
+	close(detailCh)
+
+	detailByPullID := make(map[string]prInfo, len(openPulls))
+	for r := range detailCh {
+		if r.err != nil {
+			if failOnDetailError {
+				return nil, r.err
+			}
+			continue
+		}
+		detailByPullID[r.info.pullID] = r.info
+	}
+	prs := make([]prInfo, 0, len(detailByPullID))
+	for _, pull := range openPulls {
+		if info, ok := detailByPullID[pull.PullID]; ok {
+			prs = append(prs, info)
+		}
+	}
+	d.rememberPRIndex(upstreamOrg, db, prs)
+	return prs, nil
+}
+
 // FindPR searches for an open PR on DoltHub matching the given from-branch and fork org.
 // Returns the PR URL and ID, or empty strings if none found.
 //
 // The list endpoint doesn't include branch details, so we fetch each open PR's
 // detail to match on from_branch and from_branch_owner.
 func (d *DoltHubProvider) FindPR(upstreamOrg, db, forkOrg, fromBranch string) (prURL, prID string) {
-	pulls, err := d.listPulls(upstreamOrg, db)
+	if cached, ok := d.cachedPRLookup(upstreamOrg, db, forkOrg, fromBranch); ok {
+		return cached.url, cached.id
+	}
+
+	prs, err := d.listOpenPRDetails(upstreamOrg, db, true, false)
 	if err != nil {
 		return "", ""
 	}
 
-	// Check each open PR's detail for matching branch info.
-	for _, pr := range pulls {
-		if !strings.EqualFold(pr.State, "open") {
-			continue
-		}
-		detailURL := fmt.Sprintf("%s/%s/%s/pulls/%s", dolthubAPIBase, upstreamOrg, db, pr.PullID)
-		detail, err := d.dolthubGet(detailURL)
-		if err != nil {
-			continue
-		}
-		var prDetail struct {
-			FromBranch      string `json:"from_branch"`
-			FromBranchOwner string `json:"from_branch_owner"`
-		}
-		if err := json.Unmarshal(detail, &prDetail); err != nil {
-			continue
-		}
-		if prDetail.FromBranch == fromBranch && prDetail.FromBranchOwner == forkOrg {
-			prURL := fmt.Sprintf("%s/%s/%s/pulls/%s", dolthubRepoBase, upstreamOrg, db, pr.PullID)
-			return prURL, pr.PullID
+	for _, pr := range prs {
+		if pr.fromBranch == fromBranch && pr.fromBranchOwner == forkOrg {
+			d.rememberPRLookup(upstreamOrg, db, forkOrg, fromBranch, pr.pullID)
+			prURL := fmt.Sprintf("%s/%s/%s/pulls/%s", dolthubRepoBase, upstreamOrg, db, pr.pullID)
+			return prURL, pr.pullID
 		}
 	}
 	return "", ""
@@ -586,6 +792,7 @@ func (d *DoltHubProvider) UpdatePR(upstreamOrg, db, prID, title, description str
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("DoltHub update PR error (HTTP %d): %s", resp.StatusCode, string(body))
 	}
+	d.invalidatePRRepoCaches(upstreamOrg, db)
 	return nil
 }
 
@@ -616,6 +823,7 @@ func (d *DoltHubProvider) ClosePR(upstreamOrg, db, prID string) error {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("DoltHub close PR error (HTTP %d): %s", resp.StatusCode, string(body))
 	}
+	d.invalidatePRRepoCaches(upstreamOrg, db)
 	return nil
 }
 
@@ -632,82 +840,47 @@ type PendingWantedState struct {
 	Evidence    string // from fork branch completions table
 }
 
+func (d *DoltHubProvider) invalidatePRRepoCaches(upstreamOrg, db string) {
+	if d.cache == nil {
+		return
+	}
+	prefix := prIndexCacheKey(upstreamOrg, db) + ":"
+	d.cache.mu.Lock()
+	delete(d.cache.prIndexes, prIndexCacheKey(upstreamOrg, db))
+	for key := range d.cache.prByBranch {
+		if strings.HasPrefix(key, prefix) {
+			delete(d.cache.prByBranch, key)
+		}
+	}
+	d.cache.mu.Unlock()
+}
+
+type pendingBranchSource struct {
+	owner  string
+	branch string
+}
+
+type pendingBranchRow struct {
+	wantedID  string
+	status    string
+	claimedBy string
+	isAdded   bool
+}
+
+type pendingBranchRows struct {
+	source pendingBranchSource
+	rows   []pendingBranchRow
+	err    error
+}
+
 // ListPendingWantedIDs returns wanted IDs that have open upstream PRs, detected
-// via data-diff: for each open PR it queries the fork branch for all wanted
-// items and compares against upstream main to find rows that actually differ.
-// This catches PRs from any branch naming convention (wl/, main, custom).
+// via data-diff: for each distinct open source branch it queries the fork branch
+// and compares against upstream main to find rows that actually differ. This
+// catches PRs from any branch naming convention (wl/, main, custom).
 func (d *DoltHubProvider) ListPendingWantedIDs(upstreamOrg, db string) (map[string][]PendingWantedState, error) {
-	pulls, err := d.listPulls(upstreamOrg, db)
+	prs, err := d.listOpenPRDetails(upstreamOrg, db, false, true)
 	if err != nil {
 		return nil, fmt.Errorf("listing PRs: %w", err)
-	}
-
-	// Filter open PRs.
-	var openPulls []pullSummary
-	for _, pr := range pulls {
-		if strings.EqualFold(pr.State, "open") {
-			openPulls = append(openPulls, pr)
-		}
-	}
-
-	// Fetch PR details in parallel (limited concurrency).
-	type prInfo struct {
-		pullID          string
-		fromBranch      string
-		fromBranchOwner string
-		author          string
-	}
-
-	const maxConcurrency = 10
-	type detailResult struct {
-		info prInfo
-		err  error
-	}
-	detailCh := make(chan detailResult, len(openPulls))
-	var detailWG sync.WaitGroup
-	sem := make(chan struct{}, maxConcurrency)
-
-	for _, pr := range openPulls {
-		detailWG.Add(1)
-		go func(pullID string) {
-			defer detailWG.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			detailURL := fmt.Sprintf("%s/%s/%s/pulls/%s", dolthubAPIBase, upstreamOrg, db, pullID)
-			detail, err := d.dolthubGet(detailURL)
-			if err != nil {
-				detailCh <- detailResult{err: fmt.Errorf("reading PR %s detail: %w", pullID, err)}
-				return
-			}
-			var prDetail struct {
-				FromBranch      string `json:"from_branch"`
-				FromBranchOwner string `json:"from_branch_owner"`
-				Author          string `json:"author"`
-			}
-			if err := json.Unmarshal(detail, &prDetail); err != nil {
-				detailCh <- detailResult{err: fmt.Errorf("decoding PR %s detail: %w", pullID, err)}
-				return
-			}
-			detailCh <- detailResult{
-				info: prInfo{
-					pullID:          pullID,
-					fromBranch:      prDetail.FromBranch,
-					fromBranchOwner: prDetail.FromBranchOwner,
-					author:          prDetail.Author,
-				},
-			}
-		}(pr.PullID)
-	}
-
-	detailWG.Wait()
-	close(detailCh)
-
-	var prs []prInfo
-	for r := range detailCh {
-		if r.err != nil {
-			return nil, r.err
-		}
-		prs = append(prs, r.info)
 	}
 
 	// For PRs from "main" (commits directly on the fork's main), dolt_diff
@@ -751,18 +924,18 @@ func (d *DoltHubProvider) ListPendingWantedIDs(upstreamOrg, db string) (map[stri
 	// wanted snapshot against current upstream main, which produced false
 	// positives: any fork branched before a main commit would show every
 	// subsequently-changed row as "pending" even if the fork never touched it.
-	type pendingEntry struct {
-		wantedID string
-		state    PendingWantedState
-		author   string // PR author, for filtering inherited claims
-		isAdded  bool
+	branchPRs := make(map[pendingBranchSource][]prInfo, len(prs))
+	for _, pr := range prs {
+		owner := pr.fromBranchOwner
+		if owner == "" {
+			owner = upstreamOrg
+		}
+		branchPRs[pendingBranchSource{owner: owner, branch: pr.fromBranch}] = append(branchPRs[pendingBranchSource{owner: owner, branch: pr.fromBranch}], pr)
 	}
-	type diffResult struct {
-		entries []pendingEntry
-		err     error
-	}
-	diffCh := make(chan diffResult, len(prs))
+
+	diffCh := make(chan pendingBranchRows, len(branchPRs))
 	var wg sync.WaitGroup
+	const maxConcurrency = 10
 	sem2 := make(chan struct{}, maxConcurrency)
 
 	// dolt_diff query: returns only rows where status or claimed_by actually
@@ -770,93 +943,77 @@ func (d *DoltHubProvider) ListPendingWantedIDs(upstreamOrg, db string) (map[stri
 	// fork main syncs would produce false positives for every row.
 	diffQuery := "SELECT COALESCE(to_id, from_id) as id, COALESCE(to_status, '') as status, COALESCE(to_claimed_by, '') as claimed_by, diff_type FROM dolt_diff('main', '%s', 'wanted') WHERE diff_type <> 'modified' OR COALESCE(to_status,'') <> COALESCE(from_status,'') OR COALESCE(to_claimed_by,'') <> COALESCE(from_claimed_by,'')"
 
-	for _, pr := range prs {
+	for source := range branchPRs {
 		wg.Add(1)
-		go func(pr prInfo) {
+		go func(source pendingBranchSource) {
 			defer wg.Done()
 			sem2 <- struct{}{}
 			defer func() { <-sem2 }()
-
-			prURL := fmt.Sprintf("%s/%s/%s/pulls/%s", dolthubRepoBase, upstreamOrg, db, pr.pullID)
-			branchURL := fmt.Sprintf("%s/%s/%s/data/%s",
-				dolthubRepoBase, pr.fromBranchOwner, db, url.PathEscape(pr.fromBranch))
-
-			owner := pr.fromBranchOwner
-			if owner == "" {
-				owner = upstreamOrg
+			pullsForSource := branchPRs[source]
+			pullIDLabel := source.branch
+			if len(pullsForSource) > 0 && pullsForSource[0].pullID != "" {
+				pullIDLabel = pullsForSource[0].pullID
 			}
 
 			// For PRs from "main", dolt_diff('main','main') is a no-op.
 			// Fall back to snapshot comparison against upstream main.
-			if pr.fromBranch == "main" {
+			if source.branch == "main" {
 				forkURL := fmt.Sprintf("%s/%s/%s/main?q=%s",
-					dolthubAPIBase, owner, db, url.QueryEscape(snapshotQuery))
+					dolthubAPIBase, source.owner, db, url.QueryEscape(snapshotQuery))
 				body, err := d.dolthubGet(forkURL)
 				if err != nil {
 					if isNoSuchRepositoryError(err) {
-						diffCh <- diffResult{}
+						diffCh <- pendingBranchRows{source: source}
 						return
 					}
-					diffCh <- diffResult{err: fmt.Errorf("reading fork snapshot for PR %s: %w", pr.pullID, err)}
+					diffCh <- pendingBranchRows{source: source, err: fmt.Errorf("reading fork snapshot for PR %s: %w", pullIDLabel, err)}
 					return
 				}
 				var qr queryResponse
 				if err := json.Unmarshal(body, &qr); err != nil {
-					diffCh <- diffResult{err: fmt.Errorf("decoding fork snapshot for PR %s: %w", pr.pullID, err)}
+					diffCh <- pendingBranchRows{source: source, err: fmt.Errorf("decoding fork snapshot for PR %s: %w", pullIDLabel, err)}
 					return
 				}
-				var entries []pendingEntry
+				rows := make([]pendingBranchRow, 0, len(qr.Rows))
 				for _, row := range qr.Rows {
 					id := row["id"]
 					forkStatus := row["status"]
 					forkClaimedBy := row["claimed_by"]
 					upstream, exists := upstreamItems[id]
 					if !exists || upstream.status != forkStatus || upstream.claimedBy != forkClaimedBy {
-						rigHandle := forkClaimedBy
-						if rigHandle == "" {
-							rigHandle = pr.author
-						}
-						entries = append(entries, pendingEntry{
-							wantedID: id,
-							author:   pr.author,
-							isAdded:  !exists,
-							state: PendingWantedState{
-								RigHandle: rigHandle,
-								Status:    forkStatus,
-								ClaimedBy: forkClaimedBy,
-								Branch:    pr.fromBranch,
-								BranchURL: branchURL,
-								PRURL:     prURL,
-								ForkOwner: owner,
-							},
+						rows = append(rows, pendingBranchRow{
+							wantedID:  id,
+							status:    forkStatus,
+							claimedBy: forkClaimedBy,
+							isAdded:   !exists,
 						})
 					}
 				}
-				diffCh <- diffResult{entries: entries}
+				diffCh <- pendingBranchRows{source: source, rows: rows}
 				return
 			}
 
-			escaped := strings.ReplaceAll(pr.fromBranch, "'", "''")
+			escaped := strings.ReplaceAll(source.branch, "'", "''")
 			q := fmt.Sprintf(diffQuery, escaped)
 			forkURL := fmt.Sprintf("%s/%s/%s/%s?q=%s",
-				dolthubAPIBase, owner, db, url.PathEscape(pr.fromBranch), url.QueryEscape(q))
+				dolthubAPIBase, source.owner, db, url.PathEscape(source.branch), url.QueryEscape(q))
 
 			body, err := d.dolthubGet(forkURL)
 			if err != nil {
 				if isNoSuchRepositoryError(err) {
-					diffCh <- diffResult{}
+					diffCh <- pendingBranchRows{source: source}
 					return
 				}
-				diffCh <- diffResult{err: fmt.Errorf("reading fork diff for PR %s: %w", pr.pullID, err)}
+				diffCh <- pendingBranchRows{source: source, err: fmt.Errorf("reading fork diff for PR %s: %w", pullIDLabel, err)}
 				return
 			}
 			var qr queryResponse
 			if err := json.Unmarshal(body, &qr); err != nil {
-				diffCh <- diffResult{err: fmt.Errorf("decoding fork diff for PR %s: %w", pr.pullID, err)}
+				diffCh <- pendingBranchRows{source: source, err: fmt.Errorf("decoding fork diff for PR %s: %w", pullIDLabel, err)}
 				return
 			}
 
-			var entries []pendingEntry
+			rows := make([]pendingBranchRow, 0, len(qr.Rows))
 			for _, row := range qr.Rows {
 				id := row["id"]
 				if id == "" {
@@ -869,27 +1026,15 @@ func (d *DoltHubProvider) ListPendingWantedIDs(upstreamOrg, db string) (map[stri
 				forkStatus := row["status"]
 				forkClaimedBy := row["claimed_by"]
 
-				rigHandle := forkClaimedBy
-				if rigHandle == "" {
-					rigHandle = pr.author
-				}
-				entries = append(entries, pendingEntry{
-					wantedID: id,
-					author:   pr.author,
-					isAdded:  row["diff_type"] == "added",
-					state: PendingWantedState{
-						RigHandle: rigHandle,
-						Status:    forkStatus,
-						ClaimedBy: forkClaimedBy,
-						Branch:    pr.fromBranch,
-						BranchURL: branchURL,
-						PRURL:     prURL,
-						ForkOwner: owner,
-					},
+				rows = append(rows, pendingBranchRow{
+					wantedID:  id,
+					status:    forkStatus,
+					claimedBy: forkClaimedBy,
+					isAdded:   row["diff_type"] == "added",
 				})
 			}
-			diffCh <- diffResult{entries: entries}
-		}(pr)
+			diffCh <- pendingBranchRows{source: source, rows: rows}
+		}(source)
 	}
 
 	wg.Wait()
@@ -900,57 +1045,123 @@ func (d *DoltHubProvider) ListPendingWantedIDs(upstreamOrg, db string) (map[stri
 		if result.err != nil {
 			return nil, result.err
 		}
-		for _, e := range result.entries {
-			// Reject fork statuses not in our lifecycle table. Forks we
-			// don't control may use non-standard values — skip those.
-			if !validStatus[e.state.Status] {
-				continue
+		for _, row := range result.rows {
+			for _, pr := range branchPRs[result.source] {
+				branchURL := fmt.Sprintf("%s/%s/%s/data/%s",
+					dolthubRepoBase, result.source.owner, db, url.PathEscape(pr.fromBranch))
+				rigHandle := row.claimedBy
+				if rigHandle == "" {
+					rigHandle = pr.author
+				}
+				state := PendingWantedState{
+					RigHandle: rigHandle,
+					Status:    row.status,
+					ClaimedBy: row.claimedBy,
+					Branch:    pr.fromBranch,
+					BranchURL: branchURL,
+					PRURL:     fmt.Sprintf("%s/%s/%s/pulls/%s", dolthubRepoBase, upstreamOrg, db, pr.pullID),
+					ForkOwner: result.source.owner,
+				}
+				// Reject fork statuses not in our lifecycle table. Forks we
+				// don't control may use non-standard values — skip those.
+				if !validStatus[state.Status] {
+					continue
+				}
+				// Skip stale fork state that doesn't represent intentional action.
+				// A diff appears when a branch predates an upstream update — the
+				// branch carries forward old state the fork owner never touched.
+				//
+				// Filter rules:
+				// 1. status "open" = untouched item (stale copy), unless the row
+				//    was newly added on the branch
+				// 2. claimed_by set to someone other than the PR author =
+				//    inherited claim from a previous upstream state
+				if state.Status == "open" && !row.isAdded {
+					continue
+				}
+				if state.Status == "claimed" && state.ClaimedBy != "" && state.ClaimedBy != pr.author {
+					continue
+				}
+				ids[row.wantedID] = append(ids[row.wantedID], state)
 			}
-			// Skip stale fork state that doesn't represent intentional action.
-			// A diff appears when a branch predates an upstream update — the
-			// branch carries forward old state the fork owner never touched.
-			//
-			// Filter rules:
-			// 1. status "open" = untouched item (stale copy), unless the row
-			//    was newly added on the branch
-			// 2. claimed_by set to someone other than the PR author =
-			//    inherited claim from a previous upstream state
-			if e.state.Status == "open" && !e.isAdded {
-				continue
-			}
-			if e.state.Status == "claimed" && e.state.ClaimedBy != "" && e.state.ClaimedBy != e.author {
-				continue
-			}
-			ids[e.wantedID] = append(ids[e.wantedID], e.state)
 		}
 	}
 
 	// For entries past the claiming stage, query the fork branch's completions
 	// table to surface evidence from competing submissions.
-	completionQuery := "SELECT completed_by, COALESCE(evidence,'') as evidence FROM completions WHERE wanted_id='%s'"
+	type completionRef struct {
+		wantedID string
+		index    int
+	}
+	completionTargets := make(map[pendingBranchSource]map[string][]completionRef)
 	for wantedID, states := range ids {
 		for i := range states {
 			if states[i].Status == "open" || states[i].Status == "claimed" {
 				continue
 			}
-			owner := states[i].ForkOwner
-			if owner == "" {
+			key := pendingBranchSource{owner: states[i].ForkOwner, branch: states[i].Branch}
+			if key.owner == "" || key.branch == "" {
 				continue
 			}
-			branch := states[i].Branch
-			q := fmt.Sprintf(completionQuery, strings.ReplaceAll(wantedID, "'", "''"))
-			cURL := fmt.Sprintf("%s/%s/%s/%s?q=%s",
-				dolthubAPIBase, owner, db, url.PathEscape(branch), url.QueryEscape(q))
-			body, err := d.dolthubGet(cURL)
-			if err != nil {
+			if completionTargets[key] == nil {
+				completionTargets[key] = make(map[string][]completionRef)
+			}
+			completionTargets[key][wantedID] = append(completionTargets[key][wantedID], completionRef{wantedID: wantedID, index: i})
+		}
+	}
+	for key, wantedRefs := range completionTargets {
+		wantedIDs := make([]string, 0, len(wantedRefs))
+		for wantedID := range wantedRefs {
+			wantedIDs = append(wantedIDs, wantedID)
+		}
+		slices.Sort(wantedIDs)
+		quotedIDs := make([]string, 0, len(wantedIDs))
+		for _, wantedID := range wantedIDs {
+			quotedIDs = append(quotedIDs, fmt.Sprintf("'%s'", strings.ReplaceAll(wantedID, "'", "''")))
+		}
+		q := fmt.Sprintf(
+			"SELECT wanted_id, completed_by, COALESCE(evidence,'') as evidence FROM completions WHERE wanted_id IN (%s)",
+			strings.Join(quotedIDs, ","),
+		)
+		cURL := fmt.Sprintf("%s/%s/%s/%s?q=%s",
+			dolthubAPIBase, key.owner, db, url.PathEscape(key.branch), url.QueryEscape(q))
+		body, err := d.dolthubGet(cURL)
+		if err != nil {
+			continue
+		}
+		var qr queryResponse
+		if json.Unmarshal(body, &qr) != nil || len(qr.Rows) == 0 {
+			continue
+		}
+		completionValues := make(map[string]struct {
+			completedBy string
+			evidence    string
+		}, len(qr.Rows))
+		for _, row := range qr.Rows {
+			rowWantedID := row["wanted_id"]
+			if rowWantedID == "" && len(wantedIDs) == 1 {
+				rowWantedID = wantedIDs[0]
+			}
+			if rowWantedID == "" {
 				continue
 			}
-			var qr queryResponse
-			if json.Unmarshal(body, &qr) != nil || len(qr.Rows) == 0 {
+			completionValues[rowWantedID] = struct {
+				completedBy string
+				evidence    string
+			}{
+				completedBy: row["completed_by"],
+				evidence:    row["evidence"],
+			}
+		}
+		for wantedID, refs := range wantedRefs {
+			value, ok := completionValues[wantedID]
+			if !ok {
 				continue
 			}
-			states[i].CompletedBy = qr.Rows[0]["completed_by"]
-			states[i].Evidence = qr.Rows[0]["evidence"]
+			for _, ref := range refs {
+				ids[ref.wantedID][ref.index].CompletedBy = value.completedBy
+				ids[ref.wantedID][ref.index].Evidence = value.evidence
+			}
 		}
 	}
 
