@@ -65,25 +65,39 @@ func (c *Client) Done(wantedID, evidence string) (*MutationResult, error) {
 
 // Accept validates a completion, creates a stamp, and marks the item completed.
 func (c *Client) Accept(wantedID string, input AcceptInput) (*MutationResult, error) {
+	result, subject, err := c.acceptLocked(wantedID, input)
+	if err != nil || result == nil {
+		return result, err
+	}
+	// Run the GitHub-handle cache hook after the mutex is released so a
+	// slow network call cannot delay the next mutation. The hook swallows
+	// all errors; Accept's return value is unaffected.
+	c.populateGitHubCache(subject)
+	return result, nil
+}
+
+// acceptLocked runs the Accept DML under c.mu and returns the stamp subject
+// alongside the mutation result so the caller can drive the post-lock hook.
+func (c *Client) acceptLocked(wantedID string, input AcceptInput) (*MutationResult, string, error) {
 	// Hold the mutex for the entire operation to prevent concurrent Accept()
 	// calls from both passing the idempotent check on the same completion.
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if result := c.prIdempotentLocked(wantedID, "completed"); result != nil {
-		return result, nil
+		return result, "", nil
 	}
 
 	// Look up the completion to get its ID and worker handle.
 	completion, err := commons.QueryCompletion(c.db, wantedID)
 	if err != nil {
-		return nil, fmt.Errorf("querying completion: %w", err)
+		return nil, "", fmt.Errorf("querying completion: %w", err)
 	}
 	if completion == nil {
-		return nil, fmt.Errorf("no completion found for item %s", wantedID)
+		return nil, "", fmt.Errorf("no completion found for item %s", wantedID)
 	}
 	if completion.CompletedBy == c.rigHandle {
-		return nil, &commons.ConflictError{
+		return nil, "", &commons.ConflictError{
 			Message: fmt.Sprintf("cannot issue a stamp to yourself; use \"wl close %s\"", wantedID),
 		}
 	}
@@ -102,7 +116,11 @@ func (c *Client) Accept(wantedID string, input AcceptInput) (*MutationResult, er
 	}
 
 	stmts := commons.AcceptCompletionDML(wantedID, completion.ID, c.rigHandle, c.hopURI, stamp)
-	return c.mutateLocked(wantedID, "wl accept: "+wantedID, stmts...)
+	result, err := c.mutateLocked(wantedID, "wl accept: "+wantedID, stmts...)
+	if err != nil {
+		return nil, "", err
+	}
+	return result, stamp.Subject, nil
 }
 
 // AcceptUpstream adopts a fork submission, creating a completion and stamp on the poster's branch.
@@ -113,39 +131,50 @@ func (c *Client) AcceptUpstream(wantedID, submitterHandle string, input AcceptIn
 // AcceptUpstreamSelected adopts one specific fork submission, creating a
 // completion and stamp on the poster's branch.
 func (c *Client) AcceptUpstreamSelected(wantedID string, selector UpstreamSubmissionSelector, input AcceptInput) (*MutationResult, error) {
+	result, subject, err := c.acceptUpstreamLocked(wantedID, selector, input)
+	if err != nil || result == nil {
+		return result, err
+	}
+	c.populateGitHubCache(subject)
+	return result, nil
+}
+
+// acceptUpstreamLocked runs the AcceptUpstream DML under c.mu and returns
+// the stamp subject so the caller can drive the post-lock hook.
+func (c *Client) acceptUpstreamLocked(wantedID string, selector UpstreamSubmissionSelector, input AcceptInput) (*MutationResult, string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if result := c.prIdempotentLocked(wantedID, "completed"); result != nil {
-		return result, nil
+		return result, "", nil
 	}
 
 	if c.ListPendingItems == nil && c.ListPendingItemsContext == nil {
-		return nil, fmt.Errorf("upstream PR listing not available")
+		return nil, "", fmt.Errorf("upstream PR listing not available")
 	}
 
 	pending, err := c.listPendingItemsContext(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("listing pending items: %w", err)
+		return nil, "", fmt.Errorf("listing pending items: %w", err)
 	}
 
 	match, err := matchUpstreamSubmission(pending[wantedID], selector)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	if match.Status != "in_review" {
-		return nil, fmt.Errorf("submission is not in review")
+		return nil, "", fmt.Errorf("submission is not in review")
 	}
 	if match.CompletedBy == "" {
-		return nil, fmt.Errorf("submission has no completion data")
+		return nil, "", fmt.Errorf("submission has no completion data")
 	}
 	if match.CompletedBy == c.rigHandle {
 		submitterHandle := selector.RigHandle
 		if submitterHandle == "" {
 			submitterHandle = match.RigHandle
 		}
-		return nil, &commons.ConflictError{
+		return nil, "", &commons.ConflictError{
 			Message: fmt.Sprintf("cannot issue a stamp to yourself; use \"wl close-upstream %s %s\"", wantedID, submitterHandle),
 		}
 	}
@@ -165,7 +194,11 @@ func (c *Client) AcceptUpstreamSelected(wantedID string, selector UpstreamSubmis
 	}
 
 	stmts := commons.AcceptUpstreamDML(wantedID, completionID, match.CompletedBy, match.Evidence, c.rigHandle, c.hopURI, stamp)
-	return c.mutateLocked(wantedID, "wl accept-upstream: "+wantedID, stmts...)
+	result, err := c.mutateLocked(wantedID, "wl accept-upstream: "+wantedID, stmts...)
+	if err != nil {
+		return nil, "", err
+	}
+	return result, stamp.Subject, nil
 }
 
 // RejectUpstream declines a fork submission by closing its upstream DoltHub PR.

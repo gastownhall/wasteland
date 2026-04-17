@@ -722,7 +722,7 @@ func TestDoltHubProvider_CreatePR_PrimesFindPRCache(t *testing.T) {
 	var detailCalls atomic.Int32
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/org/db/pulls/77", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/org/db/pulls/77", func(_ http.ResponseWriter, _ *http.Request) {
 		detailCalls.Add(1)
 		t.Fatal("FindPR() should use the create-path cache without reading PR detail")
 	})
@@ -1859,6 +1859,84 @@ func TestDoltHubProvider_ListPendingWantedIDs_NonStandardBranch(t *testing.T) {
 	}
 	if pending[0].Status != "completed" {
 		t.Errorf("expected status=completed, got %s", pending[0].Status)
+	}
+}
+
+func TestDoltHubProvider_ListPendingWantedIDs_FiltersRowsMatchingUpstreamMain(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/org/db/pulls", func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/pulls/") {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"pulls": []map[string]any{{"pull_id": "1", "state": "open"}},
+		})
+	})
+	mux.HandleFunc("/org/db/pulls/1", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"from_branch":       "wl/bob/w-real",
+			"from_branch_owner": "bob-fork",
+			"author":            "bob",
+		})
+	})
+	mux.HandleFunc("/org/db/main", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		q := r.URL.Query().Get("q")
+		if !strings.Contains(q, "'w-open'") || !strings.Contains(q, "'w-same-claim'") || !strings.Contains(q, "'w-real'") {
+			t.Fatalf("upstream comparison query missing wanted IDs: %s", q)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"rows": []map[string]string{
+				{"id": "w-open", "status": "open", "claimed_by": ""},
+				{"id": "w-same-claim", "status": "claimed", "claimed_by": "alice"},
+				{"id": "w-real", "status": "open", "claimed_by": ""},
+			},
+		})
+	})
+	mux.HandleFunc("/bob-fork/db/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Query().Get("q"), "FROM completions") {
+			_ = json.NewEncoder(w).Encode(map[string]any{"rows": []map[string]string{}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"rows": []map[string]string{
+				{"id": "w-open", "status": "open", "claimed_by": "", "diff_type": "added"},
+				{"id": "w-same-claim", "status": "claimed", "claimed_by": "alice", "diff_type": "modified"},
+				{"id": "w-real", "status": "claimed", "claimed_by": "bob", "diff_type": "modified"},
+			},
+		})
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	oldAPIBase, oldRepoBase := dolthubAPIBase, dolthubRepoBase
+	dolthubAPIBase = server.URL
+	dolthubRepoBase = server.URL + "/repositories"
+	defer func() {
+		dolthubAPIBase = oldAPIBase
+		dolthubRepoBase = oldRepoBase
+	}()
+
+	provider := NewDoltHubProvider("token")
+	ids, err := provider.ListPendingWantedIDs("org", "db")
+	if err != nil {
+		t.Fatalf("ListPendingWantedIDs() error: %v", err)
+	}
+
+	if len(ids) != 1 {
+		t.Fatalf("expected 1 pending ID after upstream filtering, got %d: %+v", len(ids), ids)
+	}
+	if _, ok := ids["w-open"]; ok {
+		t.Fatalf("w-open should be filtered as identical to upstream: %+v", ids["w-open"])
+	}
+	if _, ok := ids["w-same-claim"]; ok {
+		t.Fatalf("w-same-claim should be filtered as identical to upstream: %+v", ids["w-same-claim"])
+	}
+	if pending := ids["w-real"]; len(pending) != 1 || pending[0].RigHandle != "bob" || pending[0].Status != "claimed" {
+		t.Fatalf("w-real pending = %+v, want only the real branch-owned change", pending)
 	}
 }
 

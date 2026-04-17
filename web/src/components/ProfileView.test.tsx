@@ -40,6 +40,7 @@ afterEach(() => {
 describe("ProfileView", () => {
   it("renders profile details and evidence tables", async () => {
     mocked.profile.mockResolvedValue({
+      kind: "character_sheet",
       handle: "alice",
       display_name: "Alice Chen",
       bio: "Builds things",
@@ -95,5 +96,87 @@ describe("ProfileView", () => {
     renderProfile();
 
     await waitFor(() => expect(screen.getByText("No profile data.")).toBeInTheDocument());
+  });
+
+  it("renders the stamp feed variant with GitHub link and cards", async () => {
+    mocked.profile.mockResolvedValue({
+      kind: "stamp_feed",
+      handle: "rileywhite",
+      github_url: "https://github.com/rileywhite",
+      stamps_error: null,
+      stamps: [
+        {
+          id: "s1",
+          skill_tags: ["go", "backend"],
+          quality: 4,
+          reliability: 5,
+          validator: "julianknutsen",
+          message: "Added retry middleware",
+          evidence_url: "https://github.com/gastownhall/gascity/pull/548",
+          evidence_label: "gastownhall/gascity#548",
+          created_at: "2026-04-13T09:33:05Z",
+        },
+      ],
+    });
+
+    renderProfile("/profile/rileywhite");
+
+    await waitFor(() => expect(screen.getByText("rileywhite")).toBeInTheDocument());
+    expect(screen.getByText(/No character sheet yet/)).toBeInTheDocument();
+
+    const githubLink = screen.getByText("View on GitHub ↗");
+    expect(githubLink).toHaveAttribute("href", "https://github.com/rileywhite");
+    expect(githubLink).toHaveAttribute("target", "_blank");
+    expect(githubLink).toHaveAttribute("rel", "noopener noreferrer");
+
+    expect(screen.getByText("gastownhall/gascity#548")).toBeInTheDocument();
+    expect(screen.getByText("Q4 R5")).toBeInTheDocument();
+    expect(screen.getByText(/validated by julianknutsen/)).toBeInTheDocument();
+    expect(screen.getByText("Added retry middleware")).toBeInTheDocument();
+  });
+
+  it("shows an inline error message when stamps fail to load", async () => {
+    mocked.profile.mockResolvedValue({
+      kind: "stamp_feed",
+      handle: "rileywhite",
+      github_url: "https://github.com/rileywhite",
+      stamps_error: "stamps_unavailable",
+      stamps: [],
+    });
+
+    renderProfile("/profile/rileywhite");
+
+    await waitFor(() => expect(screen.getByText(/Couldn't load recent stamps/)).toBeInTheDocument());
+    expect(screen.getByText("rileywhite")).toBeInTheDocument();
+    // Stamp cards must NOT render on the degraded path.
+    expect(screen.queryByRole("article")).toBeNull();
+  });
+
+  it("rejects unsafe evidence_url schemes", async () => {
+    mocked.profile.mockResolvedValue({
+      kind: "stamp_feed",
+      handle: "attacker",
+      github_url: "https://github.com/attacker",
+      stamps_error: null,
+      stamps: [
+        {
+          id: "s-bad",
+          skill_tags: ["go"],
+          quality: 0,
+          reliability: 0,
+          validator: "reviewer",
+          evidence_url: "javascript:alert(1)",
+          evidence_label: "click me",
+          created_at: "2026-04-13T00:00:00Z",
+        },
+      ],
+    });
+
+    renderProfile("/profile/attacker");
+
+    await waitFor(() => expect(screen.getByText("attacker")).toBeInTheDocument());
+    // The card still renders, but the javascript: link is filtered out.
+    expect(screen.queryByText("click me")).toBeNull();
+    expect(screen.queryByRole("link", { name: /click me/ })).toBeNull();
   });
 });

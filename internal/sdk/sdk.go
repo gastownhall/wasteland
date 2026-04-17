@@ -6,9 +6,12 @@ package sdk
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 
 	"github.com/gastownhall/wasteland/internal/commons"
+	"github.com/gastownhall/wasteland/internal/githubcache"
+	"github.com/gastownhall/wasteland/internal/pile"
 )
 
 // ClientConfig holds the parameters needed to create a Client.
@@ -87,11 +90,18 @@ type Client struct {
 	BranchURL func(branch string) string
 	// CloseUpstreamPR closes an upstream PR by its web URL. Nil disables the feature.
 	CloseUpstreamPR func(prURL string) error
+
+	// ghCache, ghResolver, and ghCommons back the post-Accept GitHub-handle
+	// cache hook. A nil ghCache disables the hook entirely. These are set
+	// from New (best-effort) and overridable via SetGitHubCache in tests.
+	ghCache    githubcache.Cache
+	ghResolver githubcache.Resolver
+	ghCommons  pile.RowQuerier
 }
 
 // New creates a Client from the given config.
 func New(cfg ClientConfig) *Client {
-	return &Client{
+	c := &Client{
 		db:                       cfg.DB,
 		rigHandle:                cfg.RigHandle,
 		upstream:                 cfg.Upstream,
@@ -115,6 +125,17 @@ func New(cfg ClientConfig) *Client {
 		BranchURL:                cfg.BranchURL,
 		CloseUpstreamPR:          cfg.CloseUpstreamPR,
 	}
+	// Best-effort init for the post-Accept GitHub-handle cache hook. A
+	// failure here leaves ghCache nil so the hook becomes a no-op;
+	// mutations never fail because the handle cache is unavailable.
+	if cache, err := githubcache.Load(); err != nil {
+		slog.Warn("stamp_cache: disabled; could not load github-handles cache", "error", err)
+	} else {
+		c.ghCache = cache
+		c.ghResolver = githubcache.NewResolver()
+		c.ghCommons = pile.NewCommonsReader()
+	}
+	return c
 }
 
 type strictPendingReadsKey struct{}
@@ -168,5 +189,8 @@ func (c *Client) WithRigHandle(handle string) *Client {
 		ListPendingItemsContext:  c.ListPendingItemsContext,
 		BranchURL:                c.BranchURL,
 		CloseUpstreamPR:          c.CloseUpstreamPR,
+		ghCache:                  c.ghCache,
+		ghResolver:               c.ghResolver,
+		ghCommons:                c.ghCommons,
 	}
 }

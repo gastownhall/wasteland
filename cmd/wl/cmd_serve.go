@@ -343,6 +343,7 @@ func runServe(cmd *cobra.Command, stdout, stderr io.Writer) error {
 	addr := fmt.Sprintf(":%d", port)
 	slog.Info("server started", "mode", "self-sovereign", "environment", environment, "addr", addr)
 	srv := &http.Server{Addr: addr, Handler: handler, MaxHeaderBytes: 1 << 20} //nolint:gosec // bind addr is user-controlled via --port flag
+	PrimeGitHubCacheAsync()
 	return serveListen(srv)
 }
 
@@ -487,6 +488,7 @@ func runServeHosted(cmd *cobra.Command, stdout, _ io.Writer) error {
 	slog.Info("server started", "mode", "hosted", "addr", addr)
 	slog.Info("dolthub auth configured", "base_url", authBaseURL, "tenant_id", authTenantID)
 	srv := &http.Server{Addr: addr, Handler: handler, MaxHeaderBytes: 1 << 20} //nolint:gosec // bind addr is user-controlled via --port flag
+	PrimeGitHubCacheAsync()
 	return serveListen(srv)
 }
 

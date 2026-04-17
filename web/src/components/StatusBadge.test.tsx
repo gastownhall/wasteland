@@ -20,9 +20,6 @@ describe("StatusBadge", () => {
 
   it("supports validated as a first-class status", () => {
     render(<StatusBadge status="validated" />);
-    expect(screen.getByText("validated")).toHaveAttribute(
-      "data-status",
-      "validated",
-    );
+    expect(screen.getByText("validated")).toHaveAttribute("data-status", "validated");
   });
 });

@@ -206,6 +206,7 @@ func TestSetProfileQuerier_OverridesProfileSource(t *testing.T) {
 	}
 	srv.registerRoutes()
 	srv.SetProfileQuerier(pq)
+	srv.SetCommonsQuerier(&fakePileQuerier{})
 
 	ts := httptest.NewServer(srv)
 	defer ts.Close()

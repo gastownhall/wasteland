@@ -289,7 +289,8 @@ export interface ProfileProject {
   impact_tier?: string;
 }
 
-export interface ProfileResponse {
+export interface CharacterSheetResponse {
+  kind: "character_sheet";
   handle: string;
   display_name: string;
   bio?: string;
@@ -312,6 +313,29 @@ export interface ProfileResponse {
   capabilities?: ProfileSkillEntry[];
   notable_projects?: ProfileProject[];
 }
+
+export interface StampFeedEntry {
+  id: string;
+  skill_tags: string[];
+  quality: number;
+  reliability: number;
+  validator: string;
+  message?: string;
+  evidence_url?: string;
+  evidence_label?: string;
+  evidence_text?: string;
+  created_at: string;
+}
+
+export interface StampFeedResponse {
+  kind: "stamp_feed";
+  handle: string;
+  github_url: string;
+  stamps: StampFeedEntry[];
+  stamps_error: string | null;
+}
+
+export type ProfileResponse = CharacterSheetResponse | StampFeedResponse;
 
 export interface ProfileSummary {
   handle: string;

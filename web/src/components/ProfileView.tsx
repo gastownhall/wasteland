@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { profile as fetchProfile } from "../api/client";
-import type { ProfileProject, ProfileResponse, ProfileSkillEntry } from "../api/types";
+import type { CharacterSheetResponse, ProfileProject, ProfileResponse, ProfileSkillEntry } from "../api/types";
 import styles from "./ProfileView.module.css";
 import { SkeletonRows } from "./Skeleton";
+import { StampFeedView } from "./StampFeedView";
 
 export function ProfileView() {
   const { handle } = useParams<{ handle: string }>();
@@ -44,6 +45,16 @@ export function ProfileView() {
   if (error) return <p className={styles.errorText}>{error}</p>;
   if (!data) return <p className={styles.dimText}>No profile data.</p>;
 
+  if (data.kind === "stamp_feed") {
+    return <StampFeedView data={data} />;
+  }
+  if (data.kind === "character_sheet") {
+    return <CharacterSheetView data={data} />;
+  }
+  return <p className={styles.errorText}>Unsupported profile response.</p>;
+}
+
+function CharacterSheetView({ data }: { data: CharacterSheetResponse }) {
   const name = data.display_name || data.handle;
 
   return (
@@ -122,7 +133,6 @@ export function ProfileView() {
 }
 
 function DimensionBar({ label, value }: { label: string; value: number }) {
-  // Values are on 0-5 stamp scale
   const clamped = Math.max(0, Math.min(5, value));
   const pct = Math.round((clamped / 5) * 100);
   return (

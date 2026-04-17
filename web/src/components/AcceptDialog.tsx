@@ -6,6 +6,7 @@ export interface AcceptStampInput {
   quality: number;
   reliability?: number;
   severity?: string;
+  skill_tags?: string[];
   message?: string;
 }
 
@@ -22,6 +23,7 @@ export function AcceptDialog({ label, submitting, onCancel, onSubmit }: AcceptDi
   const [quality, setQuality] = useState("5");
   const [reliability, setReliability] = useState("");
   const [severity, setSeverity] = useState("leaf");
+  const [skillTags, setSkillTags] = useState("");
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -33,10 +35,15 @@ export function AcceptDialog({ label, submitting, onCancel, onSubmit }: AcceptDi
   }, [onCancel, submitting]);
 
   const submit = async () => {
+    const parsedTags = skillTags
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
     await onSubmit({
       quality: Number(quality),
       reliability: reliability ? Number(reliability) : undefined,
       severity,
+      skill_tags: parsedTags.length > 0 ? parsedTags : undefined,
       message: message.trim() || undefined,
     });
   };
@@ -101,6 +108,18 @@ export function AcceptDialog({ label, submitting, onCancel, onSubmit }: AcceptDi
             <option value="branch">Branch</option>
             <option value="root">Root</option>
           </select>
+        </label>
+
+        <label className={styles.field}>
+          <span className={styles.label}>Tags</span>
+          <input
+            className={styles.input}
+            type="text"
+            value={skillTags}
+            onChange={(e) => setSkillTags(e.target.value)}
+            placeholder="go, sql, testing"
+            disabled={submitting}
+          />
         </label>
 
         <label className={styles.field}>

@@ -117,6 +117,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newDoctorCmd(stdout, stderr),
 		newLeaderboardCmd(stdout, stderr),
 		newProfileCmd(stdout, stderr),
+		newResolveGitHubCmd(stdout, stderr),
 		newVersionCmd(stdout),
 	)
 	if inferGateEnabled() {

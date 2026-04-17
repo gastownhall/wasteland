@@ -62,10 +62,6 @@ describe("FilterBar", () => {
   it("includes validated in the status filter options", () => {
     render(<FilterBar filter={baseFilter} onChange={onChange} />);
     const statusSelect = screen.getByLabelText("Filter by status");
-    expect(
-      Array.from(statusSelect.querySelectorAll("option")).map(
-        (option) => option.value,
-      ),
-    ).toContain("validated");
+    expect(Array.from(statusSelect.querySelectorAll("option")).map((option) => option.value)).toContain("validated");
   });
 });

@@ -1,3 +1,6 @@
+// Package dolthubdouble provides an in-process HTTP double for the DoltHub
+// API, used by the e2e test harness to exercise remote-facing code paths
+// without depending on dolthub.com.
 package dolthubdouble
 
 import (
@@ -20,6 +23,7 @@ import (
 
 const schemaCommitMessage = "Initialize wl-commons schema v1.0"
 
+// RequestLog captures a single HTTP request observed by the double.
 type RequestLog struct {
 	Method  string            `json:"method"`
 	Path    string            `json:"path"`
@@ -28,17 +32,22 @@ type RequestLog struct {
 	Body    string            `json:"body,omitempty"`
 }
 
+// RepoRef identifies a DoltHub repository by owner/db.
 type RepoRef struct {
 	Owner string `json:"owner"`
 	DB    string `json:"db"`
 }
 
+// BranchSeed describes a branch to create during Seed, optionally forked
+// from an existing branch and populated with SQL statements.
 type BranchSeed struct {
 	Name string   `json:"name"`
 	From string   `json:"from,omitempty"`
 	SQL  []string `json:"sql,omitempty"`
 }
 
+// RepositorySeed describes a repository to create during Seed, including
+// any fork relationship, initial main-branch SQL, and additional branches.
 type RepositorySeed struct {
 	Owner    string       `json:"owner"`
 	DB       string       `json:"db"`
@@ -47,6 +56,7 @@ type RepositorySeed struct {
 	Branches []BranchSeed `json:"branches,omitempty"`
 }
 
+// PRSeed describes a pull request to create during Seed.
 type PRSeed struct {
 	ID            string `json:"id,omitempty"`
 	UpstreamOwner string `json:"upstream_owner"`
@@ -60,11 +70,14 @@ type PRSeed struct {
 	Description   string `json:"description,omitempty"`
 }
 
+// SeedRequest is the JSON body accepted by the double's seed endpoint.
 type SeedRequest struct {
 	Repositories []RepositorySeed `json:"repositories,omitempty"`
 	PRs          []PRSeed         `json:"prs,omitempty"`
 }
 
+// RepositorySnapshot captures a point-in-time view of a repository's
+// branches and pull requests.
 type RepositorySnapshot struct {
 	Owner       string                    `json:"owner"`
 	DB          string                    `json:"db"`
@@ -72,6 +85,8 @@ type RepositorySnapshot struct {
 	PullRequest []PullRequestSnapshot     `json:"pull_requests,omitempty"`
 }
 
+// BranchSnapshot captures the row contents of each well-known table on
+// a single branch.
 type BranchSnapshot struct {
 	Wanted      []map[string]string `json:"wanted,omitempty"`
 	Completions []map[string]string `json:"completions,omitempty"`
@@ -79,6 +94,8 @@ type BranchSnapshot struct {
 	Rigs        []map[string]string `json:"rigs,omitempty"`
 }
 
+// PullRequestSnapshot captures a single pull request's state for test
+// assertions.
 type PullRequestSnapshot struct {
 	ID              string `json:"id"`
 	UpstreamOwner   string `json:"upstream_owner"`
@@ -93,12 +110,15 @@ type PullRequestSnapshot struct {
 	URL             string `json:"url"`
 }
 
+// Snapshot is the aggregate of observed requests, repository state, and
+// pull request state returned by the double's snapshot endpoint.
 type Snapshot struct {
 	Requests     []RequestLog          `json:"requests"`
 	Repositories []RepositorySnapshot  `json:"repositories"`
 	PullRequests []PullRequestSnapshot `json:"pull_requests"`
 }
 
+// Server is an in-process HTTP double for DoltHub's REST and SQL APIs.
 type Server struct {
 	root string
 
@@ -129,6 +149,8 @@ type pullRequest struct {
 	Description     string
 }
 
+// New returns a Server that stores repository state under root. If root
+// is empty, a temporary directory is allocated.
 func New(root string) (*Server, error) {
 	if root == "" {
 		tmp, err := os.MkdirTemp("", "wasteland-dolthub-double-*")
@@ -148,10 +170,14 @@ func New(root string) (*Server, error) {
 	}, nil
 }
 
+// Close removes the server's root directory and any repository state
+// underneath it.
 func (s *Server) Close() error {
 	return os.RemoveAll(s.root)
 }
 
+// Reset removes all repositories, pull requests, and request logs from
+// the server while leaving the root directory in place.
 func (s *Server) Reset() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -168,6 +194,8 @@ func (s *Server) Reset() error {
 	return nil
 }
 
+// Seed applies a SeedRequest: creating repositories, branches, and pull
+// requests as described.
 func (s *Server) Seed(req SeedRequest) error {
 	for _, repoSeed := range req.Repositories {
 		if _, err := s.ensureRepository(repoSeed); err != nil {
@@ -182,6 +210,8 @@ func (s *Server) Seed(req SeedRequest) error {
 	return nil
 }
 
+// Snapshot returns a point-in-time view of observed requests, repository
+// contents, and pull-request state. baseURL is used to compose PR URLs.
 func (s *Server) Snapshot(baseURL string) (Snapshot, error) {
 	s.mu.Lock()
 	requests := append([]RequestLog(nil), s.requests...)
@@ -226,6 +256,9 @@ func (s *Server) Snapshot(baseURL string) (Snapshot, error) {
 	}, nil
 }
 
+// MergePR merges the specified PR by copying changed rows from the source
+// branch into the upstream repo's main branch, mirroring DoltHub's
+// server-side merge behavior for the double's test contract.
 func (s *Server) MergePR(prID string) error {
 	s.mu.Lock()
 	pr, ok := s.prs[prID]
@@ -279,6 +312,8 @@ func (s *Server) MergePR(prID string) error {
 	return nil
 }
 
+// Handler returns an http.Handler serving the double's emulated
+// DoltHub REST and SQL endpoints.
 func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.recordRequest(r)
@@ -329,10 +364,10 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	owner := parts[0]
 	db := parts[1]
 
-	switch {
-	case parts[2] == "pulls":
+	switch parts[2] {
+	case "pulls":
 		s.handlePulls(w, r, owner, db, parts[3:])
-	case parts[2] == "write":
+	case "write":
 		s.handleWrite(w, r, owner, db, parts[3:])
 	default:
 		s.handleQuery(w, r, owner, db, strings.Join(parts[2:], "/"))
@@ -343,7 +378,7 @@ func (s *Server) handlePulls(w http.ResponseWriter, r *http.Request, owner, db s
 	switch {
 	case len(rest) == 0 && r.Method == http.MethodGet:
 		pulls := s.listPRs(owner, db)
-		writeJSON(w, http.StatusOK, map[string]any{"pulls": pulls})
+		writeJSON(w, map[string]any{"pulls": pulls})
 	case len(rest) == 0 && r.Method == http.MethodPost:
 		var req struct {
 			Title           string `json:"title"`
@@ -374,14 +409,14 @@ func (s *Server) handlePulls(w http.ResponseWriter, r *http.Request, owner, db s
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"_id": pr.ID, "status": pr.State})
+		writeJSON(w, map[string]any{"_id": pr.ID, "status": pr.State})
 	case len(rest) == 1 && r.Method == http.MethodGet:
 		pr, ok := s.getPR(rest[0])
 		if !ok || pr.UpstreamOwner != owner || pr.UpstreamDB != db {
 			http.NotFound(w, r)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
+		writeJSON(w, map[string]any{
 			"from_branch":       pr.FromBranch,
 			"from_branch_owner": pr.FromBranchOwner,
 			"author":            pr.Author,
@@ -396,7 +431,7 @@ func (s *Server) handlePulls(w http.ResponseWriter, r *http.Request, owner, db s
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		writeJSON(w, map[string]string{"status": "ok"})
 	default:
 		http.NotFound(w, r)
 	}
@@ -404,7 +439,7 @@ func (s *Server) handlePulls(w http.ResponseWriter, r *http.Request, owner, db s
 
 func (s *Server) handleWrite(w http.ResponseWriter, r *http.Request, owner, db string, rest []string) {
 	if len(rest) == 0 && r.Method == http.MethodGet {
-		writeJSON(w, http.StatusOK, map[string]any{
+		writeJSON(w, map[string]any{
 			"done": true,
 			"res_details": map[string]string{
 				"query_execution_status":  "Success",
@@ -434,7 +469,7 @@ func (s *Server) handleWrite(w http.ResponseWriter, r *http.Request, owner, db s
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeJSON(w, map[string]any{
 		"query_execution_status":  "Success",
 		"query_execution_message": "",
 	})
@@ -453,7 +488,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request, owner, db, 
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
+		writeJSON(w, map[string]any{
 			"query_execution_status": "Success",
 			"repository_owner":       owner,
 			"repository_name":        db,
@@ -473,7 +508,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request, owner, db, 
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, response)
+	writeJSON(w, response)
 }
 
 func (s *Server) recordRequest(r *http.Request) {
@@ -908,9 +943,7 @@ func csvToQueryResponse(owner, db, ref, sqlQuery, csvData string) (map[string]an
 		})
 	}
 	rowObjects := make([]map[string]string, 0, len(rows))
-	for _, row := range rows {
-		rowObjects = append(rowObjects, row)
-	}
+	rowObjects = append(rowObjects, rows...)
 	return map[string]any{
 		"query_execution_status":  "Success",
 		"query_execution_message": "",
@@ -953,9 +986,9 @@ func parseCSV(csvData string) ([]string, []map[string]string, error) {
 	return headers, rows, nil
 }
 
-func writeJSON(w http.ResponseWriter, status int, value any) {
+func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
+	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(value)
 }
 
@@ -1146,11 +1179,4 @@ func copyDir(src, dest string) error {
 		}
 		return os.WriteFile(target, data, info.Mode())
 	})
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

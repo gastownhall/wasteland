@@ -1,3 +1,6 @@
+// Command hostedapi runs an in-process hosted mode backend against the
+// DoltHub double for multi-actor e2e scenarios that need the full hosted
+// auth + federation stack without any real upstream dependency.
 package main
 
 import (
@@ -6,7 +9,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -112,13 +117,19 @@ var defaultActors = []actorConfig{
 }
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	addr := flag.String("addr", defaultAddr, "listen address")
 	root := flag.String("root", "", "working directory for the fake DoltHub state")
 	flag.Parse()
 
 	double, err := dolthubdouble.New(*root)
 	if err != nil {
-		log.Fatalf("create DoltHub double: %v", err)
+		return fmt.Errorf("create DoltHub double: %w", err)
 	}
 	defer func() { _ = double.Close() }()
 
@@ -133,7 +144,7 @@ func main() {
 		state.actors[actor.Handle] = actor
 	}
 	if err := state.reset(); err != nil {
-		log.Fatalf("reset e2e state: %v", err)
+		return fmt.Errorf("reset e2e state: %w", err)
 	}
 
 	authClient := dolthubauth.NewClient(dolthubauth.ClientConfig{
@@ -198,9 +209,10 @@ func main() {
 	mux.Handle("/", hostedHandler)
 
 	log.Printf("e2e hosted api listening on %s", *addr)
-	if err := http.ListenAndServe(*addr, mux); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("serve e2e hosted api: %v", err)
+	if err := http.ListenAndServe(*addr, mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("serve e2e hosted api: %w", err)
 	}
+	return nil
 }
 
 func (s *serverState) captureHosted(next http.Handler) http.Handler {
@@ -282,7 +294,7 @@ func (s *serverState) handleAuthConnection(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "connection not found", http.StatusUnauthorized)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.connectionResponse(actor))
+	writeJSON(w, s.connectionResponse(actor))
 }
 
 func (s *serverState) handleAuthProxyAPI(w http.ResponseWriter, r *http.Request) {
@@ -348,7 +360,7 @@ func (s *serverState) handleReset(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "reset"})
+	writeJSON(w, map[string]string{"status": "reset"})
 }
 
 func (s *serverState) handleSeed(w http.ResponseWriter, r *http.Request) {
@@ -365,7 +377,7 @@ func (s *serverState) handleSeed(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "seeded"})
+	writeJSON(w, map[string]string{"status": "seeded"})
 }
 
 func (s *serverState) handleState(w http.ResponseWriter, r *http.Request) {
@@ -381,7 +393,7 @@ func (s *serverState) handleState(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, testState{
+	writeJSON(w, testState{
 		HostedRequests: hostedRequests,
 		DoltHub:        snapshot,
 	})
@@ -410,7 +422,7 @@ func (s *serverState) handleSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, testSessionResponse{
+	writeJSON(w, testSessionResponse{
 		SessionCookieName:  "wl_session",
 		SessionCookieValue: hosted.SignSessionCookie(sessionID, actor.ConnectionID, sessionSecret),
 		SubjectCookieName:  "wl_subject",
@@ -436,7 +448,7 @@ func (s *serverState) handleMergePR(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "merged"})
+	writeJSON(w, map[string]string{"status": "merged"})
 }
 
 func rigInsert(handle, displayName string) string {
@@ -617,9 +629,9 @@ func copyResponse(w http.ResponseWriter, resp *http.Response) {
 	_, _ = io.Copy(w, resp.Body)
 }
 
-func writeJSON(w http.ResponseWriter, status int, value any) {
+func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
+	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(value)
 }
 

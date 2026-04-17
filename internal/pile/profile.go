@@ -2,8 +2,11 @@ package pile
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/gastownhall/wasteland/internal/commons"
@@ -64,6 +67,236 @@ type Project struct {
 
 // ErrProfileNotFound is returned when a profile handle has no matching record.
 var ErrProfileNotFound = fmt.Errorf("profile not found")
+
+// ProfileResponseKind identifies the discriminated variant of a profile
+// response returned by QueryProfileResponse.
+type ProfileResponseKind string
+
+// Recognized ProfileResponseKind variants.
+const (
+	KindCharacterSheet ProfileResponseKind = "character_sheet"
+	KindStampFeed      ProfileResponseKind = "stamp_feed"
+)
+
+// ProfileResponse is a discriminated union. Exactly one of CharacterSheet
+// or StampFeed is non-nil, matching Kind.
+type ProfileResponse struct {
+	Kind           ProfileResponseKind
+	CharacterSheet *Profile
+	StampFeed      *StampFeed
+}
+
+// characterSheetWire and stampFeedWire are marshal-only helpers so the wire
+// format is a flat object with a leading "kind" field regardless of variant.
+// The embedded pointer types intentionally do NOT implement json.Marshaler;
+// if they ever do, Go's promotion rule would silently drop the outer Kind
+// field. Do not add MarshalJSON to *Profile or *StampFeed without reworking
+// this marshaller.
+type characterSheetWire struct {
+	Kind string `json:"kind"`
+	*Profile
+}
+
+type stampFeedWire struct {
+	Kind string `json:"kind"`
+	*StampFeed
+}
+
+// MarshalJSON emits the wrapped variant with an injected kind field.
+func (r *ProfileResponse) MarshalJSON() ([]byte, error) {
+	switch r.Kind {
+	case KindCharacterSheet:
+		if r.CharacterSheet == nil {
+			return nil, fmt.Errorf("ProfileResponse: character_sheet kind with nil body")
+		}
+		return json.Marshal(characterSheetWire{Kind: string(r.Kind), Profile: r.CharacterSheet})
+	case KindStampFeed:
+		if r.StampFeed == nil {
+			return nil, fmt.Errorf("ProfileResponse: stamp_feed kind with nil body")
+		}
+		return json.Marshal(stampFeedWire{Kind: string(r.Kind), StampFeed: r.StampFeed})
+	default:
+		return nil, fmt.Errorf("ProfileResponse: unknown kind %q", r.Kind)
+	}
+}
+
+// StampFeed is the fallback view for a handle with no boot_block but at
+// least one stamp in hop/wl-commons.
+type StampFeed struct {
+	Handle      string           `json:"handle"`
+	GithubURL   string           `json:"github_url"`
+	Stamps      []StampFeedEntry `json:"stamps"`
+	StampsError *string          `json:"stamps_error"`
+}
+
+// StampFeedEntry is one card in the stamp feed.
+type StampFeedEntry struct {
+	ID            string   `json:"id"`
+	SkillTags     []string `json:"skill_tags"`
+	Quality       int      `json:"quality"`
+	Reliability   int      `json:"reliability"`
+	Validator     string   `json:"validator"`
+	Message       string   `json:"message,omitempty"`
+	EvidenceURL   string   `json:"evidence_url,omitempty"`
+	EvidenceLabel string   `json:"evidence_label,omitempty"`
+	EvidenceText  string   `json:"evidence_text,omitempty"`
+	CreatedAt     string   `json:"created_at"`
+}
+
+// GithubHandleLookup resolves a rig handle to a verified GitHub username.
+// It returns the cached entry and true when the handle has been recorded
+// (whether resolution succeeded or was tried-and-failed), or a zero Entry
+// and false when the handle has never been resolved. Implementations must
+// be safe for concurrent use. Pass nil to skip the lookup entirely — the
+// stamp feed then emits an empty GithubURL and the UI renders no link.
+type GithubHandleLookup func(handle string) (github string, ok bool)
+
+// QueryProfileResponse returns a character sheet if hop/the-pile has a
+// boot_block for the handle, otherwise falls back to a stamp feed assembled
+// from hop/wl-commons. Returns ErrProfileNotFound only when both sources
+// are empty — a truly unknown handle. If commonsReader is nil, the fallback
+// is skipped and ErrProfileNotFound propagates from the pile lookup.
+//
+// cacheGet, when non-nil, is consulted for the stamp-feed variant to
+// populate StampFeed.GithubURL from a persistent rig-handle → GitHub
+// username cache. Cache miss, absent handle, or empty GitHub username all
+// yield an empty GithubURL. The character-sheet path never consults it.
+func QueryProfileResponse(pileReader, commonsReader RowQuerier, cacheGet GithubHandleLookup, handle string) (*ProfileResponse, error) {
+	profile, err := QueryProfile(pileReader, handle)
+	if err == nil {
+		return &ProfileResponse{Kind: KindCharacterSheet, CharacterSheet: profile}, nil
+	}
+	if !errors.Is(err, ErrProfileNotFound) {
+		return nil, err
+	}
+	if commonsReader == nil {
+		return nil, err
+	}
+
+	githubURL := ""
+	if cacheGet != nil {
+		if gh, ok := cacheGet(handle); ok && gh != "" {
+			githubURL = "https://github.com/" + url.PathEscape(gh)
+		}
+	}
+
+	feed := &StampFeed{
+		Handle:    handle,
+		GithubURL: githubURL,
+		Stamps:    []StampFeedEntry{},
+	}
+
+	stamps, ferr := queryStampFeed(commonsReader, handle)
+	if ferr != nil {
+		slog.Warn("stamp feed fallback unavailable", "handle", handle, "error", ferr)
+		code := "stamps_unavailable"
+		feed.StampsError = &code
+		return &ProfileResponse{Kind: KindStampFeed, StampFeed: feed}, nil
+	}
+
+	if len(stamps) == 0 {
+		return nil, fmt.Errorf("%w: %s", ErrProfileNotFound, handle)
+	}
+
+	feed.Stamps = stamps
+	return &ProfileResponse{Kind: KindStampFeed, StampFeed: feed}, nil
+}
+
+// queryStampFeed fetches the last 10 stamps for a handle from hop/wl-commons,
+// joined with their completion evidence.
+func queryStampFeed(reader RowQuerier, handle string) ([]StampFeedEntry, error) {
+	sql := fmt.Sprintf(
+		`SELECT s.id, s.skill_tags, s.valence, s.message, s.author, s.created_at, c.evidence `+
+			`FROM stamps s LEFT JOIN completions c ON s.context_id = c.id `+
+			`WHERE s.subject = '%s' `+
+			`ORDER BY s.created_at DESC, s.id DESC LIMIT 10`,
+		commons.EscapeSQL(handle))
+	rows, err := reader.QueryRows(sql)
+	if err != nil {
+		return nil, fmt.Errorf("querying stamp feed: %w", err)
+	}
+	feed := make([]StampFeedEntry, 0, len(rows))
+	for _, row := range rows {
+		feed = append(feed, parseStampFeedRow(row))
+	}
+	return feed, nil
+}
+
+func parseStampFeedRow(row map[string]any) StampFeedEntry {
+	id := toString(row["id"])
+	tags := []string{}
+	if raw := toString(row["skill_tags"]); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &tags); err != nil {
+			slog.Warn("malformed stamp skill_tags", "id", id, "value", raw, "error", err)
+			tags = []string{}
+		}
+	}
+	var valence struct {
+		Quality     int `json:"quality"`
+		Reliability int `json:"reliability"`
+	}
+	if raw := toString(row["valence"]); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &valence); err != nil {
+			slog.Warn("malformed stamp valence", "id", id, "value", raw, "error", err)
+		}
+	}
+	eURL, label, text := parseEvidence(toString(row["evidence"]))
+	return StampFeedEntry{
+		ID:            id,
+		SkillTags:     tags,
+		Quality:       valence.Quality,
+		Reliability:   valence.Reliability,
+		Validator:     toString(row["author"]),
+		Message:       toString(row["message"]),
+		EvidenceURL:   eURL,
+		EvidenceLabel: label,
+		EvidenceText:  text,
+		CreatedAt:     toString(row["created_at"]),
+	}
+}
+
+// GitHub URL regexes anchored so the owner/repo/pull segments cannot be
+// followed by trailing whitespace or free text that would turn the evidence
+// URL into a broken link. Valid GitHub URLs end at the matched segment, a
+// path separator, a query, or a fragment. Repo and owner captures exclude
+// query/fragment/whitespace chars so a URL like
+// "https://github.com/foo/bar?tab=readme" yields label "foo/bar", not the
+// noisy "foo/bar?tab=readme".
+var (
+	githubPRRegex   = regexp.MustCompile(`^https?://github\.com/([^/?#\s]+)/([^/?#\s]+)/pull/(\d+)(?:$|[/?#])`)
+	githubRepoRegex = regexp.MustCompile(`^https?://github\.com/([^/?#\s]+)/([^/?#\s]+)(?:$|[/?#])`)
+)
+
+// parseEvidence splits raw evidence text into (url, label, text).
+//
+//	GitHub PR URL      → url unchanged, label "owner/repo#N", text ""
+//	Other GitHub URL   → url unchanged, label "owner/repo",   text ""
+//	Other http(s) URL  → url unchanged, label "",             text ""
+//	Non-URL text       → url "",        label "",             text raw
+//	Empty              → all ""
+//
+// Any embedded whitespace (after leading/trailing trim) causes the value to
+// be treated as free text rather than a URL, so prose that starts with a
+// URL prefix cannot produce a broken clickable link.
+func parseEvidence(raw string) (eURL, label, text string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", ""
+	}
+	if strings.ContainsAny(raw, " \t\n\r") {
+		return "", "", raw
+	}
+	if m := githubPRRegex.FindStringSubmatch(raw); m != nil {
+		return raw, fmt.Sprintf("%s/%s#%s", m[1], m[2], m[3]), ""
+	}
+	if m := githubRepoRegex.FindStringSubmatch(raw); m != nil {
+		return raw, fmt.Sprintf("%s/%s", m[1], m[2]), ""
+	}
+	if u, err := url.Parse(raw); err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https") {
+		return raw, "", ""
+	}
+	return "", "", raw
+}
 
 // ProfileSummary is a lightweight profile for search results.
 type ProfileSummary struct {

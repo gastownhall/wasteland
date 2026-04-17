@@ -1,3 +1,6 @@
+// Command harness runs an in-process wl backend with a seeded DoltHub
+// double so that browser-based e2e tests can drive the web UI against a
+// deterministic, auth-free server.
 package main
 
 import (
@@ -191,7 +194,7 @@ func (s *appState) recordRequest(r *http.Request, body []byte) {
 	})
 }
 
-func (s *appState) handleRuntimeConfig(w http.ResponseWriter, r *http.Request) {
+func (s *appState) handleRuntimeConfig(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"environment":                "staging",
 		"browser_tracing_enabled":    false,
@@ -271,13 +274,13 @@ func (s *appState) handleBrowse(w http.ResponseWriter, r *http.Request) {
 func (s *appState) handlePost(w http.ResponseWriter, r *http.Request) {
 	body, err := readBody(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeError(w, err)
 		return
 	}
 
 	var input postInput
 	if err := json.Unmarshal(body, &input); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeError(w, err)
 		return
 	}
 
@@ -355,13 +358,13 @@ func (s *appState) handleClaim(w http.ResponseWriter, r *http.Request) {
 func (s *appState) handleDone(w http.ResponseWriter, r *http.Request) {
 	body, err := readBody(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeError(w, err)
 		return
 	}
 
 	var input doneInput
 	if err := json.Unmarshal(body, &input); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeError(w, err)
 		return
 	}
 
@@ -391,13 +394,13 @@ func (s *appState) handleDone(w http.ResponseWriter, r *http.Request) {
 func (s *appState) handleAcceptUpstream(w http.ResponseWriter, r *http.Request) {
 	body, err := readBody(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeError(w, err)
 		return
 	}
 
 	var input acceptUpstreamInput
 	if err := json.Unmarshal(body, &input); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeError(w, err)
 		return
 	}
 
@@ -414,7 +417,7 @@ func (s *appState) handleAcceptUpstream(w http.ResponseWriter, r *http.Request) 
 	}
 
 	actor := s.currentActor(r)
-	if !(item.PostedBy == actor || commons.Admins[actor]) {
+	if item.PostedBy != actor && !commons.Admins[actor] {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
@@ -521,7 +524,7 @@ func (s *appState) handleScoreboard(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *appState) handleReset(w http.ResponseWriter, r *http.Request) {
+func (s *appState) handleReset(w http.ResponseWriter, _ *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -529,7 +532,7 @@ func (s *appState) handleReset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "reset"})
 }
 
-func (s *appState) handleTestState(w http.ResponseWriter, r *http.Request) {
+func (s *appState) handleTestState(w http.ResponseWriter, _ *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -809,35 +812,35 @@ func cloneItem(item *wantedItem) *wantedItem {
 	if item == nil {
 		return nil
 	}
-	copy := *item
-	copy.Tags = slices.Clone(item.Tags)
-	return &copy
+	dup := *item
+	dup.Tags = slices.Clone(item.Tags)
+	return &dup
 }
 
 func cloneCompletion(completion *completionRecord) *completionRecord {
 	if completion == nil {
 		return nil
 	}
-	copy := *completion
-	return &copy
+	dup := *completion
+	return &dup
 }
 
 func cloneStamp(stamp *stampRecord) *stampRecord {
 	if stamp == nil {
 		return nil
 	}
-	copy := *stamp
-	copy.SkillTags = slices.Clone(stamp.SkillTags)
-	return &copy
+	dup := *stamp
+	dup.SkillTags = slices.Clone(stamp.SkillTags)
+	return &dup
 }
 
 func clonePending(submission *pendingSubmission) *pendingSubmission {
 	if submission == nil {
 		return nil
 	}
-	copy := *submission
-	copy.SkillTags = slices.Clone(submission.SkillTags)
-	return &copy
+	dup := *submission
+	dup.SkillTags = slices.Clone(submission.SkillTags)
+	return &dup
 }
 
 func defaultString(value, fallback string) string {
@@ -858,7 +861,7 @@ func defaultPriority(priority int) int {
 }
 
 func readBody(r *http.Request) ([]byte, error) {
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 	return ioReadAllLimit(r.Body, 1<<20)
 }
 
@@ -879,6 +882,6 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-func writeError(w http.ResponseWriter, status int, err error) {
-	writeJSON(w, status, map[string]string{"error": err.Error()})
+func writeError(w http.ResponseWriter, err error) {
+	writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 }

@@ -10,7 +10,10 @@ import (
 const maxProfileSearchLimit = 100
 
 // handleProfile serves GET /api/profile/{handle}
-// Returns a full developer profile from hop/the-pile.
+// Returns a discriminated profile response. If hop/the-pile has a boot_block
+// for the handle, emits kind=character_sheet with the full developer profile.
+// Otherwise falls back to kind=stamp_feed assembled from hop/wl-commons.
+// 404 only when both sources are empty.
 // No auth required — profile lookups are public read-only data.
 func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 	handle := r.PathValue("handle")
@@ -24,7 +27,14 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	profile, err := pile.QueryProfile(s.pile, handle)
+	resp, err := pile.QueryProfileResponse(s.pile, s.commons, s.githubHandleLookup(), handle)
+	// When the pile misses and commons is not wired, the caller can't
+	// distinguish "truly unknown handle" from "fallback source is
+	// unconfigured" — surface this as 503 instead of a misleading 404.
+	if errors.Is(err, pile.ErrProfileNotFound) && s.commons == nil {
+		writeError(w, http.StatusServiceUnavailable, "profile fallback source not configured")
+		return
+	}
 	if err != nil {
 		if errors.Is(err, pile.ErrProfileNotFound) {
 			writeError(w, http.StatusNotFound, err.Error())
@@ -33,7 +43,7 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, profile)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleProfileSearch serves GET /api/profile?q=search

@@ -42,6 +42,13 @@ func NewDefault() *Client {
 	return New("", "hop", "the-pile")
 }
 
+// NewCommonsReader creates a read-only Client for hop/wl-commons, the public
+// anonymous upstream used as a fallback data source when a handle has no
+// boot_block in the-pile.
+func NewCommonsReader() *Client {
+	return New("", "hop", "wl-commons")
+}
+
 // queryRaw runs a SQL query and returns the raw DoltHub JSON response body.
 func (p *Client) queryRaw(sql string) ([]byte, error) {
 	apiURL := fmt.Sprintf("%s/%s/%s/%s?q=%s",

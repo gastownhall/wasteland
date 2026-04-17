@@ -1,3 +1,6 @@
+// Command webserver serves the embedded web UI against the e2e harness
+// backend so browser automation can drive the full stack without a real
+// wl binary.
 package main
 
 import (

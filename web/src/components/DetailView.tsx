@@ -1,10 +1,4 @@
-import {
-  startTransition,
-  useCallback,
-  useEffect,
-  useOptimistic,
-  useState,
-} from "react";
+import { startTransition, useCallback, useEffect, useOptimistic, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -189,16 +183,10 @@ export function DetailView() {
     setAcceptSubmitting(true);
     try {
       const result = acceptTarget.isUpstream
-        ? await acceptUpstream(
-            id,
-            { rig_handle: acceptTarget.rigHandle!, pr_url: acceptTarget.prURL },
-            stamp,
-          )
+        ? await acceptUpstream(id, { rig_handle: acceptTarget.rigHandle!, pr_url: acceptTarget.prURL }, stamp)
         : await accept(id, stamp);
       toast.success(
-        acceptTarget.isUpstream
-          ? `Accepted ${acceptTarget.rigHandle}'s submission`
-          : "Accepted submission",
+        acceptTarget.isUpstream ? `Accepted ${acceptTarget.rigHandle}'s submission` : "Accepted submission",
       );
       setAcceptTarget(null);
       if (result?.detail) {
@@ -226,9 +214,7 @@ export function DetailView() {
       const resp = await branchDiff(data.branch);
       setDiffContent(resp.diff);
     } catch (e) {
-      setDiffContent(
-        `Error loading diff: ${e instanceof Error ? e.message : "unknown error"}`,
-      );
+      setDiffContent(`Error loading diff: ${e instanceof Error ? e.message : "unknown error"}`);
     } finally {
       setDiffLoading(false);
     }
@@ -284,16 +270,11 @@ export function DetailView() {
   } = data;
   const branchActions = branch_actions || [];
   const displayStatus = optimisticStatus || item.status;
-  const canEdit =
-    Boolean(viewerRigHandle) && viewerRigHandle === item.posted_by;
+  const canEdit = Boolean(viewerRigHandle) && viewerRigHandle === item.posted_by;
 
   return (
     <div className={styles.page}>
-      <button
-        type="button"
-        className={styles.backBtn}
-        onClick={() => navigate(-1)}
-      >
+      <button type="button" className={styles.backBtn} onClick={() => navigate(-1)}>
         &larr; back
       </button>
 
@@ -301,11 +282,7 @@ export function DetailView() {
         <div className={styles.titleRow}>
           <h2 className={styles.title}>{item.title}</h2>
           {canEdit && (
-            <button
-              type="button"
-              className={styles.editBtn}
-              onClick={() => setShowEditForm(true)}
-            >
+            <button type="button" className={styles.editBtn} onClick={() => setShowEditForm(true)}>
               Edit
             </button>
           )}
@@ -317,9 +294,7 @@ export function DetailView() {
         </div>
       </div>
 
-      {item.description && (
-        <div className={styles.description}>{item.description}</div>
-      )}
+      {item.description && <div className={styles.description}>{item.description}</div>}
 
       <div className={styles.metadata}>
         <span className={styles.metaLabel}>Posted by</span>
@@ -346,12 +321,7 @@ export function DetailView() {
           <>
             <span className={styles.metaLabel}>Branch</span>
             {branch_url ? (
-              <a
-                href={branch_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={styles.metaMono}
-              >
+              <a href={branch_url} target="_blank" rel="noopener noreferrer" className={styles.metaMono}>
                 {branch}
               </a>
             ) : (
@@ -362,12 +332,7 @@ export function DetailView() {
         {pr_url && (
           <>
             <span className={styles.metaLabel}>PR</span>
-            <a
-              href={pr_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={styles.prLink}
-            >
+            <a href={pr_url} target="_blank" rel="noopener noreferrer" className={styles.prLink}>
               {pr_url}
             </a>
           </>
@@ -375,11 +340,7 @@ export function DetailView() {
       </div>
 
       {upstream_prs && upstream_prs.length > 0 && (
-        <Section
-          title={
-            upstream_prs.length === 1 ? "Submission" : "Competing Submissions"
-          }
-        >
+        <Section title={upstream_prs.length === 1 ? "Submission" : "Competing Submissions"}>
           <div className={styles.sectionContent}>
             {upstream_prs.map((pr, i) => {
               const isUpstream = pr.is_upstream;
@@ -392,12 +353,7 @@ export function DetailView() {
                   {pr.pr_url && (
                     <>
                       {" "}
-                      <a
-                        href={pr.pr_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={styles.prLink}
-                      >
+                      <a href={pr.pr_url} target="_blank" rel="noopener noreferrer" className={styles.prLink}>
                         PR
                       </a>
                     </>
@@ -405,22 +361,13 @@ export function DetailView() {
                   {pr.branch_url && (
                     <>
                       {" "}
-                      <a
-                        href={pr.branch_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={styles.prLink}
-                      >
+                      <a href={pr.branch_url} target="_blank" rel="noopener noreferrer" className={styles.prLink}>
                         branch
                       </a>
                     </>
                   )}
-                  {pr.evidence && (
-                    <div className={styles.evidenceText}>{pr.evidence}</div>
-                  )}
-                  {(actions.includes("accept") ||
-                    actions.includes("reject") ||
-                    actions.includes("close")) && (
+                  {pr.evidence && <div className={styles.evidenceText}>{pr.evidence}</div>}
+                  {(actions.includes("accept") || actions.includes("reject") || actions.includes("close")) && (
                     <div className={styles.actions}>
                       {pr.status === "in_review" && pr.evidence && (
                         <ActionButton
@@ -447,16 +394,10 @@ export function DetailView() {
                             } else {
                               await reject(id!);
                             }
-                            toast.success(
-                              `Rejected ${pr.rig_handle}'s submission`,
-                            );
+                            toast.success(`Rejected ${pr.rig_handle}'s submission`);
                             await load();
                           } catch (e) {
-                            toast.error(
-                              e instanceof Error
-                                ? e.message
-                                : "Failed to reject",
-                            );
+                            toast.error(e instanceof Error ? e.message : "Failed to reject");
                           }
                         }}
                       />
@@ -471,20 +412,14 @@ export function DetailView() {
                                     pr_url: pr.pr_url,
                                   })
                                 : await close(id!);
-                              toast.success(
-                                `Closed ${pr.rig_handle}'s submission`,
-                              );
+                              toast.success(`Closed ${pr.rig_handle}'s submission`);
                               if (result?.detail) {
                                 setData(result.detail);
                               } else {
                                 await load();
                               }
                             } catch (e) {
-                              toast.error(
-                                e instanceof Error
-                                  ? e.message
-                                  : "Failed to close",
-                              );
+                              toast.error(e instanceof Error ? e.message : "Failed to close");
                             }
                           }}
                         />
@@ -502,22 +437,12 @@ export function DetailView() {
         <Section title="Completion">
           <div className={styles.sectionContent}>
             <p className={styles.sectionText}>
-              Completed by:{" "}
-              <span className={styles.highlightBrass}>
-                {completion.completed_by}
-              </span>
+              Completed by: <span className={styles.highlightBrass}>{completion.completed_by}</span>
             </p>
-            {completion.evidence && (
-              <p className={styles.sectionText}>
-                Evidence: {completion.evidence}
-              </p>
-            )}
+            {completion.evidence && <p className={styles.sectionText}>Evidence: {completion.evidence}</p>}
             {completion.validated_by && (
               <p className={styles.sectionTextLast}>
-                Validated by:{" "}
-                <span className={styles.highlightGreen}>
-                  {completion.validated_by}
-                </span>
+                Validated by: <span className={styles.highlightGreen}>{completion.validated_by}</span>
               </p>
             )}
           </div>
@@ -528,16 +453,13 @@ export function DetailView() {
         <Section title="Stamp">
           <div className={styles.sectionContent}>
             <p className={styles.sectionText}>
-              Author:{" "}
-              <span className={styles.highlightBrass}>{stamp.author}</span>
+              Author: <span className={styles.highlightBrass}>{stamp.author}</span>
             </p>
             <p className={styles.sectionText}>Subject: {stamp.subject}</p>
             <p className={styles.sectionText}>
               Quality: {stamp.quality} / Reliability: {stamp.reliability}
             </p>
-            {stamp.message && (
-              <p className={styles.sectionTextLast}>{stamp.message}</p>
-            )}
+            {stamp.message && <p className={styles.sectionTextLast}>{stamp.message}</p>}
           </div>
         </Section>
       )}
@@ -546,27 +468,18 @@ export function DetailView() {
         <Section title="Branch Delta">
           <pre className={styles.diffPre}>{delta}</pre>
           {branch && diffContent === null && (
-            <button
-              type="button"
-              className={styles.diffBtn}
-              onClick={handleLoadDiff}
-              disabled={diffLoading}
-            >
+            <button type="button" className={styles.diffBtn} onClick={handleLoadDiff} disabled={diffLoading}>
               {diffLoading ? "Loading diff..." : "View diff"}
             </button>
           )}
-          {diffContent && (
-            <pre className={styles.diffResult}>{diffContent}</pre>
-          )}
+          {diffContent && <pre className={styles.diffResult}>{diffContent}</pre>}
         </Section>
       )}
 
       {showDoneForm && (
         <Section title="Submit for Review">
           <div className={styles.sectionContent}>
-            <label className={styles.doneLabel}>
-              Evidence (URL or description)
-            </label>
+            <label className={styles.doneLabel}>Evidence (URL or description)</label>
             <input
               className={styles.evidenceInput}
               type="text"
@@ -604,18 +517,12 @@ export function DetailView() {
       {(() => {
         const submissionActions = new Set(["accept", "reject", "close"]);
         const hasSubmissions = upstream_prs && upstream_prs.length > 0;
-        const filteredActions = hasSubmissions
-          ? actions.filter((a) => !submissionActions.has(a))
-          : actions;
+        const filteredActions = hasSubmissions ? actions.filter((a) => !submissionActions.has(a)) : actions;
         return (
           (filteredActions.length > 0 || branchActions.length > 0) && (
             <div className={styles.actions}>
               {filteredActions.map((action) => (
-                <ActionButton
-                  key={action}
-                  action={action}
-                  onAction={async () => onActionClick(action)}
-                />
+                <ActionButton key={action} action={action} onAction={async () => onActionClick(action)} />
               ))}
               {branchActions.map((action) => (
                 <ActionButton
@@ -668,13 +575,7 @@ export function DetailView() {
   );
 }
 
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className={styles.section}>
       <h3 className={styles.sectionTitle}>{title}</h3>

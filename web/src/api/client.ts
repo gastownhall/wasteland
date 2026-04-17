@@ -98,10 +98,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     const isWrite = init?.method && init.method !== "GET";
     if (isWrite && !_activeUpstream) {
-      throw new ApiError(
-        0,
-        "Not connected to a wasteland — please refresh the page",
-      );
+      throw new ApiError(0, "Not connected to a wasteland — please refresh the page");
     }
     const headers = new Headers(init?.headers);
     if (_activeUpstream) {
@@ -122,10 +119,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   // Redirect to /connect on auth failures in hosted mode.
   if (resp.status === 401 || resp.status === 412) {
-    if (
-      typeof window !== "undefined" &&
-      !window.location.pathname.startsWith("/connect")
-    ) {
+    if (typeof window !== "undefined" && !window.location.pathname.startsWith("/connect")) {
       const returnTo = window.location.pathname + window.location.search;
       const reason = resp.status === 401 ? "&reason=expired" : "";
       window.location.href = `/connect?return_to=${encodeURIComponent(returnTo)}${reason}`;
@@ -141,10 +135,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(resp.status, resp.statusText || "Invalid response");
   }
   if (!resp.ok) {
-    const err = new ApiError(
-      resp.status,
-      (body as ErrorResponse).error || resp.statusText,
-    );
+    const err = new ApiError(resp.status, (body as ErrorResponse).error || resp.statusText);
     if (resp.status >= 500 && resp.status !== 503) {
       Sentry.captureException(err);
     }
@@ -157,8 +148,7 @@ function buildQuery(filter: BrowseFilter): string {
   const params = new URLSearchParams();
   if (filter.status) params.set("status", filter.status);
   if (filter.type) params.set("type", filter.type);
-  if (filter.priority !== undefined && filter.priority >= 0)
-    params.set("priority", String(filter.priority));
+  if (filter.priority !== undefined && filter.priority >= 0) params.set("priority", String(filter.priority));
   if (filter.project) params.set("project", filter.project);
   if (filter.search) params.set("search", filter.search);
   if (filter.sort) params.set("sort", filter.sort);
@@ -168,9 +158,7 @@ function buildQuery(filter: BrowseFilter): string {
   return qs ? `?${qs}` : "";
 }
 
-export async function browse(
-  filter: BrowseFilter = {},
-): Promise<BrowseResponse> {
+export async function browse(filter: BrowseFilter = {}): Promise<BrowseResponse> {
   return request<BrowseResponse>(`/api/wanted${buildQuery(filter)}`);
 }
 
@@ -206,10 +194,7 @@ export async function unclaim(id: string): Promise<MutationResponse> {
   });
 }
 
-export async function reject(
-  id: string,
-  reason?: string,
-): Promise<MutationResponse> {
+export async function reject(id: string, reason?: string): Promise<MutationResponse> {
   return request<MutationResponse>(`/api/wanted/${id}/reject`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -223,10 +208,7 @@ export async function close(id: string): Promise<MutationResponse> {
   });
 }
 
-export async function done(
-  id: string,
-  evidence: string,
-): Promise<MutationResponse> {
+export async function done(id: string, evidence: string): Promise<MutationResponse> {
   return request<MutationResponse>(`/api/wanted/${id}/done`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -274,10 +256,7 @@ export async function acceptUpstream(
   });
 }
 
-export async function rejectUpstream(
-  id: string,
-  target: UpstreamSubmissionTarget,
-): Promise<void> {
+export async function rejectUpstream(id: string, target: UpstreamSubmissionTarget): Promise<void> {
   await request<Record<string, string>>(`/api/wanted/${id}/reject-upstream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -285,10 +264,7 @@ export async function rejectUpstream(
   });
 }
 
-export async function closeUpstream(
-  id: string,
-  target: UpstreamSubmissionTarget,
-): Promise<MutationResponse> {
+export async function closeUpstream(id: string, target: UpstreamSubmissionTarget): Promise<MutationResponse> {
   return request<MutationResponse>(`/api/wanted/${id}/close-upstream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -334,10 +310,7 @@ export async function createItem(input: PostInput): Promise<MutationResponse> {
   });
 }
 
-export async function updateItem(
-  id: string,
-  input: UpdateInput,
-): Promise<MutationResponse> {
+export async function updateItem(id: string, input: UpdateInput): Promise<MutationResponse> {
   return request<MutationResponse>(`/api/wanted/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -359,9 +332,7 @@ export async function authStatus(): Promise<AuthStatusResponse> {
   return request<AuthStatusResponse>("/api/auth/status");
 }
 
-export async function connectSession(
-  input: ConnectSessionInput,
-): Promise<ConnectSessionResponse> {
+export async function connectSession(input: ConnectSessionInput): Promise<ConnectSessionResponse> {
   return request<ConnectSessionResponse>("/api/auth/connect-session", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -369,9 +340,7 @@ export async function connectSession(
   });
 }
 
-export async function notifyConnect(
-  input: ConnectInput,
-): Promise<ConnectResponse> {
+export async function notifyConnect(input: ConnectInput): Promise<ConnectResponse> {
   return request<ConnectResponse>("/api/auth/connect", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

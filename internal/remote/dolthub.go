@@ -1040,12 +1040,63 @@ func (d *DoltHubProvider) ListPendingWantedIDs(upstreamOrg, db string) (map[stri
 	wg.Wait()
 	close(diffCh)
 
-	ids := make(map[string][]PendingWantedState)
+	branchResults := make([]pendingBranchRows, 0, len(branchPRs))
+	compareIDs := make(map[string]struct{})
 	for result := range diffCh {
 		if result.err != nil {
 			return nil, result.err
 		}
+		branchResults = append(branchResults, result)
+		if result.source.branch == "main" {
+			continue
+		}
 		for _, row := range result.rows {
+			if row.wantedID != "" {
+				compareIDs[row.wantedID] = struct{}{}
+			}
+		}
+	}
+
+	if len(compareIDs) > 0 && upstreamItems == nil {
+		wantedIDs := make([]string, 0, len(compareIDs))
+		for wantedID := range compareIDs {
+			wantedIDs = append(wantedIDs, wantedID)
+		}
+		slices.Sort(wantedIDs)
+		quotedIDs := make([]string, 0, len(wantedIDs))
+		for _, wantedID := range wantedIDs {
+			quotedIDs = append(quotedIDs, fmt.Sprintf("'%s'", strings.ReplaceAll(wantedID, "'", "''")))
+		}
+		upstreamItems = make(map[string]wantedItem, len(wantedIDs))
+		upstreamCompareQuery := fmt.Sprintf(
+			"SELECT id, status, COALESCE(claimed_by, '') as claimed_by FROM wanted WHERE id IN (%s)",
+			strings.Join(quotedIDs, ","),
+		)
+		upstreamURL := fmt.Sprintf("%s/%s/%s/main?q=%s",
+			dolthubAPIBase, upstreamOrg, db, url.QueryEscape(upstreamCompareQuery))
+		body, err := d.dolthubGet(upstreamURL)
+		if err == nil {
+			var qr queryResponse
+			if json.Unmarshal(body, &qr) == nil {
+				for _, row := range qr.Rows {
+					upstreamItems[row["id"]] = wantedItem{
+						status:    row["status"],
+						claimedBy: row["claimed_by"],
+					}
+				}
+			}
+		}
+	}
+
+	ids := make(map[string][]PendingWantedState)
+	for _, result := range branchResults {
+		for _, row := range result.rows {
+			if result.source.branch != "main" {
+				if upstream, exists := upstreamItems[row.wantedID]; exists &&
+					upstream.status == row.status && upstream.claimedBy == row.claimedBy {
+					continue
+				}
+			}
 			for _, pr := range branchPRs[result.source] {
 				branchURL := fmt.Sprintf("%s/%s/%s/data/%s",
 					dolthubRepoBase, result.source.owner, db, url.PathEscape(pr.fromBranch))

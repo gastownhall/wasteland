@@ -47,6 +47,7 @@
 }
 
 .select,
+.input,
 .textarea {
   width: 100%;
   box-sizing: border-box;
@@ -128,6 +129,7 @@
   .cancelBtn,
   .confirmBtn,
   .select,
+  .input,
   .textarea {
     min-height: 44px;
   }
