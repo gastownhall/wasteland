@@ -5,9 +5,12 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	kms "cloud.google.com/go/kms/apiv1"
 	"cloud.google.com/go/kms/apiv1/kmspb"
@@ -42,8 +45,9 @@ func (c realKMSEnvelopeClient) GetCryptoKey(ctx context.Context, req *kmspb.GetC
 // GCPKMSEnvelopeCipher encrypts credentials with a local DEK and wraps the DEK
 // with Google Cloud KMS.
 type GCPKMSEnvelopeCipher struct {
-	client  kmsEnvelopeClient
-	keyName string
+	client   kmsEnvelopeClient
+	keyName  string
+	dekCache *kmsDEKCache
 }
 
 type kmsEnvelopePayload struct {
@@ -80,8 +84,9 @@ func newGCPKMSEnvelopeCipherWithClient(client kmsEnvelopeClient, keyName string)
 		return nil, fmt.Errorf("kms client is required")
 	}
 	return &GCPKMSEnvelopeCipher{
-		client:  client,
-		keyName: keyName,
+		client:   client,
+		keyName:  keyName,
+		dekCache: newKMSDEKCache(5*time.Minute, 1024),
 	}, nil
 }
 
@@ -160,14 +165,19 @@ func (c *GCPKMSEnvelopeCipher) Decrypt(ctx context.Context, ciphertext []byte, k
 		keyVersion = c.keyName
 	}
 
-	unwrapped, err := c.client.Decrypt(ctx, &kmspb.DecryptRequest{
-		Name:       kmsEnvelopeCryptoKeyName(keyVersion, c.keyName),
-		Ciphertext: payload.WrappedDEK,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("unwrap dek: %w", err)
+	cacheKey := kmsEnvelopeDEKCacheKey(keyVersion, payload.WrappedDEK)
+	dek, ok := c.dekCache.Get(cacheKey)
+	if !ok {
+		unwrapped, err := c.client.Decrypt(ctx, &kmspb.DecryptRequest{
+			Name:       kmsEnvelopeCryptoKeyName(keyVersion, c.keyName),
+			Ciphertext: payload.WrappedDEK,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("unwrap dek: %w", err)
+		}
+		dek = append([]byte(nil), unwrapped.GetPlaintext()...)
+		c.dekCache.Set(cacheKey, dek)
 	}
-	dek := append([]byte(nil), unwrapped.GetPlaintext()...)
 	defer clearBytes(dek)
 
 	block, err := aes.NewCipher(dek)
@@ -200,6 +210,96 @@ func kmsEnvelopeCryptoKeyName(keyVersion, fallback string) string {
 
 func kmsEnvelopeAAD(keyVersion string) []byte {
 	return []byte("wasteland:dolthub-auth:gcp-kms-envelope:" + strings.TrimSpace(keyVersion))
+}
+
+func kmsEnvelopeDEKCacheKey(keyVersion string, wrappedDEK []byte) string {
+	sum := sha256.Sum256(wrappedDEK)
+	return strings.TrimSpace(keyVersion) + ":" + fmt.Sprintf("%x", sum[:])
+}
+
+type kmsDEKCache struct {
+	mu         sync.Mutex
+	ttl        time.Duration
+	maxEntries int
+	entries    map[string]kmsDEKCacheEntry
+}
+
+type kmsDEKCacheEntry struct {
+	dek       []byte
+	expiresAt time.Time
+	usedAt    time.Time
+}
+
+func newKMSDEKCache(ttl time.Duration, maxEntries int) *kmsDEKCache {
+	if ttl <= 0 || maxEntries <= 0 {
+		return nil
+	}
+	return &kmsDEKCache{
+		ttl:        ttl,
+		maxEntries: maxEntries,
+		entries:    make(map[string]kmsDEKCacheEntry),
+	}
+}
+
+func (c *kmsDEKCache) Get(key string) ([]byte, bool) {
+	if c == nil {
+		return nil, false
+	}
+	now := time.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.entries[key]
+	if !ok {
+		return nil, false
+	}
+	if now.After(entry.expiresAt) {
+		clearBytes(entry.dek)
+		delete(c.entries, key)
+		return nil, false
+	}
+	entry.usedAt = now
+	c.entries[key] = entry
+	return append([]byte(nil), entry.dek...), true
+}
+
+func (c *kmsDEKCache) Set(key string, dek []byte) {
+	if c == nil || key == "" || len(dek) == 0 {
+		return
+	}
+	now := time.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if old, ok := c.entries[key]; ok {
+		clearBytes(old.dek)
+	}
+	c.entries[key] = kmsDEKCacheEntry{
+		dek:       append([]byte(nil), dek...),
+		expiresAt: now.Add(c.ttl),
+		usedAt:    now,
+	}
+	c.evictLocked(now)
+}
+
+func (c *kmsDEKCache) evictLocked(now time.Time) {
+	for key, entry := range c.entries {
+		if now.After(entry.expiresAt) {
+			clearBytes(entry.dek)
+			delete(c.entries, key)
+		}
+	}
+	for len(c.entries) > c.maxEntries {
+		var oldestKey string
+		var oldestAt time.Time
+		for key, entry := range c.entries {
+			if oldestKey == "" || entry.usedAt.Before(oldestAt) {
+				oldestKey = key
+				oldestAt = entry.usedAt
+			}
+		}
+		entry := c.entries[oldestKey]
+		clearBytes(entry.dek)
+		delete(c.entries, oldestKey)
+	}
 }
 
 func clearBytes(buf []byte) {

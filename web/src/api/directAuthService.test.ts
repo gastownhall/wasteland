@@ -135,4 +135,66 @@ describe("redeemConnectToken", () => {
       requestId: "req_123",
     });
   });
+
+  it("identifies browser network failures to the auth service", async () => {
+    mockFetch(() => Promise.reject(new TypeError("fetch failed")));
+
+    await expect(
+      redeemConnectToken({
+        auth_service_base_url: "https://auth.example.test/base",
+        connect_token: "connect-token",
+        redeem_secret: "redeem-secret",
+        api_key: "secret-token",
+        metadata: buildConnectTokenMetadata({
+          rig_handle: "alice",
+          fork_org: "alice-org",
+          fork_db: "wl-commons",
+          upstream: "hop/wl-commons",
+        }),
+      }),
+    ).rejects.toMatchObject({
+      message:
+        "Could not reach the DoltHub auth service at https://auth.example.test. Your browser or network may be blocking that host.",
+      status: 0,
+      errorCode: "auth_service_unreachable",
+      retryable: true,
+    });
+  });
+
+  it("surfaces expired connect-token failures", async () => {
+    mockFetch(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            error_code: "expired_connect_token",
+            user_message: "The connect token has expired. Start the connect flow again.",
+          }),
+          {
+            status: 401,
+            statusText: "Unauthorized",
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      ),
+    );
+
+    await expect(
+      redeemConnectToken({
+        auth_service_base_url: "https://auth.example.test",
+        connect_token: "connect-token",
+        redeem_secret: "redeem-secret",
+        api_key: "secret-token",
+        metadata: buildConnectTokenMetadata({
+          rig_handle: "alice",
+          fork_org: "alice-org",
+          fork_db: "wl-commons",
+          upstream: "hop/wl-commons",
+        }),
+      }),
+    ).rejects.toMatchObject({
+      message: "The connect token has expired. Start the connect flow again.",
+      status: 401,
+      errorCode: "expired_connect_token",
+    });
+  });
 });

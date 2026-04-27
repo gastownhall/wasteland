@@ -38,6 +38,14 @@ function buildRedeemUrl(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/v1/connect-tokens/redeem`;
 }
 
+function authServiceOrigin(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).origin;
+  } catch {
+    return baseUrl;
+  }
+}
+
 export async function redeemConnectToken(input: RedeemConnectTokenInput): Promise<RedeemConnectTokenResponse> {
   let resp: Response;
   try {
@@ -52,7 +60,13 @@ export async function redeemConnectToken(input: RedeemConnectTokenInput): Promis
       }),
     });
   } catch {
-    throw new DirectAuthServiceError("Network error while reaching the auth service", 0);
+    throw new DirectAuthServiceError(
+      `Could not reach the DoltHub auth service at ${authServiceOrigin(input.auth_service_base_url)}. ` +
+        "Your browser or network may be blocking that host.",
+      0,
+      "auth_service_unreachable",
+      true,
+    );
   }
 
   let body: RedeemConnectTokenResponse | RedeemConnectTokenErrorResponse | null = null;

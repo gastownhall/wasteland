@@ -14,6 +14,7 @@ type fakeKMSEnvelopeClient struct {
 	lastDecryptName string
 	lastGetName     string
 	versionName     string
+	decryptCalls    int
 	checkErr        error
 	encryptErr      error
 	decryptErr      error
@@ -34,6 +35,7 @@ func (f *fakeKMSEnvelopeClient) Decrypt(_ context.Context, req *kmspb.DecryptReq
 	if f.decryptErr != nil {
 		return nil, f.decryptErr
 	}
+	f.decryptCalls++
 	f.lastDecryptName = req.GetName()
 	if len(req.GetCiphertext()) < len("wrapped:") || string(req.GetCiphertext()[:len("wrapped:")]) != "wrapped:" {
 		return nil, errors.New("unexpected wrapped dek")
@@ -95,6 +97,36 @@ func TestGCPKMSEnvelopeCipher_RoundTrip(t *testing.T) {
 	}
 	if client.lastGetName != keyName {
 		t.Fatalf("lastGetName = %q", client.lastGetName)
+	}
+}
+
+func TestGCPKMSEnvelopeCipher_DecryptCachesUnwrappedDEK(t *testing.T) {
+	t.Parallel()
+
+	const keyName = "projects/example-project/locations/us-central1/keyRings/example-ring/cryptoKeys/dolthub-auth-staging"
+	client := &fakeKMSEnvelopeClient{
+		versionName: keyName + "/cryptoKeyVersions/7",
+	}
+	cipher, err := newGCPKMSEnvelopeCipherWithClient(client, keyName)
+	if err != nil {
+		t.Fatalf("newGCPKMSEnvelopeCipherWithClient() error = %v", err)
+	}
+
+	encoded, keyVersion, backend, err := cipher.Encrypt(context.Background(), []byte("super-secret-token"))
+	if err != nil {
+		t.Fatalf("Encrypt() error = %v", err)
+	}
+	for range 2 {
+		plaintext, err := cipher.Decrypt(context.Background(), encoded, keyVersion, backend)
+		if err != nil {
+			t.Fatalf("Decrypt() error = %v", err)
+		}
+		if string(plaintext) != "super-secret-token" {
+			t.Fatalf("plaintext = %q", plaintext)
+		}
+	}
+	if client.decryptCalls != 1 {
+		t.Fatalf("decryptCalls = %d, want 1", client.decryptCalls)
 	}
 }
 

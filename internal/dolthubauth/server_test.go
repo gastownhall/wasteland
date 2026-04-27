@@ -167,6 +167,55 @@ func TestServerRedeemInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestServerRedeemExpiredTokenReturnsCORSJSON(t *testing.T) {
+	srv, err := NewServer(validConfig(), Dependencies{
+		Store:      expiredRedeemStore{},
+		KeyManager: fakeCipher{},
+	})
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+
+	reqBody, _ := json.Marshal(RedeemConnectTokenRequest{
+		ConnectToken: "connect-token",
+		RedeemSecret: "redeem-secret",
+		APIKey:       "secret-token",
+		Metadata: UserMetadata{
+			RigHandle: "alice",
+			Wastelands: []WastelandConfig{{
+				Upstream: "hop/wl-commons",
+				ForkOrg:  "alice-org",
+				ForkDB:   "wl-commons",
+				Mode:     "pr",
+				Signing:  true,
+			}},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/connect-tokens/redeem", bytes.NewReader(reqBody))
+	req.Header.Set("Origin", "https://app.example")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "https://app.example" {
+		t.Fatalf("Access-Control-Allow-Origin = %q", got)
+	}
+	if got := rec.Header().Get("X-Wasteland-Auth-Error-Code"); got != "expired_connect_token" {
+		t.Fatalf("X-Wasteland-Auth-Error-Code = %q", got)
+	}
+	if !strings.Contains(rec.Body.String(), `"error_code":"expired_connect_token"`) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+type expiredRedeemStore struct{ fakeStore }
+
+func (f expiredRedeemStore) RedeemConnectToken(context.Context, RedeemInput) (*Connection, error) {
+	return nil, ErrExpiredConnectToken
+}
+
 func TestServerCORSRejectsUnknownOrigin(t *testing.T) {
 	srv, err := NewServer(validConfig(), Dependencies{
 		Store:      fakeStore{},

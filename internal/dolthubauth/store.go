@@ -107,7 +107,7 @@ func (s *PostgresStore) RedeemConnectToken(ctx context.Context, input RedeemInpu
 	if usedAt != nil {
 		return nil, ErrInvalidConnectToken
 	}
-	if input.Now.After(expiresAt) {
+	if connectTokenExpired(input.Now, expiresAt) {
 		return nil, ErrExpiredConnectToken
 	}
 	if tenantID != input.TenantID || environment != input.Environment {
@@ -556,6 +556,10 @@ func (s *PostgresStore) UseServiceNonce(ctx context.Context, keyID, nonce string
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+func connectTokenExpired(now, expiresAt time.Time) bool {
+	return !now.Before(expiresAt)
 }
 
 func (s *PostgresStore) reapExpiredConnectTokens(ctx context.Context, now time.Time) error {

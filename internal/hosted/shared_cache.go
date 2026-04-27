@@ -58,21 +58,6 @@ func newPendingUpstreamCache(provider *remote.DoltHubProvider, upOrg, upDB strin
 
 	c.scheduleRefresh(context.Background())
 
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				c.scheduleRefresh(context.Background())
-			case <-c.stop:
-				return
-			}
-		}
-	}()
-
 	return c
 }
 

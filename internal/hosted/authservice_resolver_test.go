@@ -2,11 +2,15 @@ package hosted
 
 import (
 	"context"
+	"io"
 	"net/http"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gastownhall/wasteland/internal/dolthubauth"
+	"github.com/gastownhall/wasteland/internal/remote"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -67,4 +71,34 @@ func TestAuthServiceWorkspaceResolver_BuildClientWarmsPendingCache(t *testing.T)
 		t.Fatalf("expected pending cache %q to be created during build", key)
 	}
 	cache.Stop()
+}
+
+func TestPendingUpstreamCache_DoesNotRefreshWithoutReaders(t *testing.T) {
+	var calls atomic.Int32
+	provider := remote.NewDoltHubProviderWithClient(&http.Client{
+		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			calls.Add(1)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"pulls":[]}`)),
+			}, nil
+		}),
+	})
+	cache := newPendingUpstreamCache(provider, "hop", "wl-commons", 10*time.Millisecond)
+	defer cache.Stop()
+
+	deadline := time.Now().Add(time.Second)
+	for calls.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	first := calls.Load()
+	if first == 0 {
+		t.Fatal("initial pending refresh did not run")
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	if got := calls.Load(); got != first {
+		t.Fatalf("pending cache refreshed without readers: calls = %d, want %d", got, first)
+	}
 }
