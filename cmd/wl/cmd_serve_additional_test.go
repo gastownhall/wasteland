@@ -80,6 +80,7 @@ func TestHostedPublicUpstream_IsCanonical(t *testing.T) {
 
 func TestRunServe_NoSyncSkipsLocalSyncAndPush(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("DOLTHUB_TOKEN", "token")
 	saveTestConfig(t, &federation.Config{
 		Upstream:  "hop/wl-commons",
 		ForkOrg:   "alice",
