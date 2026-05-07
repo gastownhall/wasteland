@@ -11,6 +11,7 @@ import (
 	bubbletea "github.com/charmbracelet/bubbletea"
 	"github.com/gastownhall/wasteland/internal/api"
 	"github.com/gastownhall/wasteland/internal/federation"
+	"github.com/gastownhall/wasteland/internal/pile"
 	"github.com/gastownhall/wasteland/internal/sdk"
 	"github.com/gastownhall/wasteland/internal/tui"
 )
@@ -21,6 +22,7 @@ type fakeSelfHostedServer struct {
 }
 
 func (s *fakeSelfHostedServer) SetEnvironment(environment string)       { s.env = environment }
+func (s *fakeSelfHostedServer) SetCommonsQuerier(pile.RowQuerier)       {}
 func (s *fakeSelfHostedServer) SetScoreboard(*api.CachedEndpoint)       {}
 func (s *fakeSelfHostedServer) SetScoreboardDetail(*api.CachedEndpoint) {}
 func (s *fakeSelfHostedServer) SetScoreboardDump(*api.CachedEndpoint)   {}

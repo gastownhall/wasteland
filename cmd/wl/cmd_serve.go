@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ import (
 	"github.com/gastownhall/wasteland/internal/federation"
 	"github.com/gastownhall/wasteland/internal/hosted"
 	"github.com/gastownhall/wasteland/internal/observability"
+	"github.com/gastownhall/wasteland/internal/pile"
 	"github.com/gastownhall/wasteland/internal/remote"
 	"github.com/gastownhall/wasteland/internal/sdk"
 	"github.com/gastownhall/wasteland/internal/style"
@@ -85,6 +87,7 @@ type remoteWorkflowDB interface {
 type selfHostedAPIServer interface {
 	http.Handler
 	SetEnvironment(string)
+	SetCommonsQuerier(pile.RowQuerier)
 	SetScoreboard(*api.CachedEndpoint)
 	SetScoreboardDetail(*api.CachedEndpoint)
 	SetScoreboardDump(*api.CachedEndpoint)
@@ -106,6 +109,7 @@ func newServeCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd.Flags().Int("port", 8999, "Port to listen on")
 	cmd.Flags().Bool("dev", false, "Enable CORS for development (Vite proxy)")
 	cmd.Flags().Bool("hosted", false, "Run in multi-tenant hosted mode")
+	cmd.Flags().Bool("no-sync", false, "Skip upstream sync before serving")
 	cmd.AddCommand(newServeAuthCmd(stdout, stderr))
 	return cmd
 }
@@ -197,6 +201,7 @@ func runServe(cmd *cobra.Command, stdout, stderr io.Writer) error {
 
 	port := resolvePort(cmd)
 	devMode, _ := cmd.Flags().GetBool("dev")
+	noSync, _ := cmd.Flags().GetBool("no-sync")
 
 	cfg, err := resolveWasteland(cmd)
 	if err != nil {
@@ -214,16 +219,18 @@ func runServe(cmd *cobra.Command, stdout, stderr io.Writer) error {
 		localDB := newLocalWorkflowDB(cfg.LocalDir, cfg.ResolveMode())
 		db = localDB
 
-		sp := style.StartSpinner(stderr, "Syncing with upstream...")
-		err = localDB.Sync()
-		sp.Stop()
-		if err != nil {
-			return fmt.Errorf("syncing with upstream: %w", err)
-		}
+		if !noSync {
+			sp := style.StartSpinner(stderr, "Syncing with upstream...")
+			err = localDB.Sync()
+			sp.Stop()
+			if err != nil {
+				return fmt.Errorf("syncing with upstream: %w", err)
+			}
 
-		if cfg.ResolveMode() == federation.ModePR {
-			if err := localDB.PushMain(io.Discard); err != nil {
-				slog.Warn("could not sync origin/main", "error", err)
+			if cfg.ResolveMode() == federation.ModePR {
+				if err := localDB.PushMain(io.Discard); err != nil {
+					slog.Warn("could not sync origin/main", "error", err)
+				}
 			}
 		}
 	} else {
@@ -238,11 +245,13 @@ func runServe(cmd *cobra.Command, stdout, stderr io.Writer) error {
 		remoteDB = newRemoteWorkflowDB(token, upOrg, upDB, cfg.ForkOrg, cfg.ForkDB, cfg.ResolveMode())
 		db = remoteDB
 
-		sp := style.StartSpinner(stderr, "Syncing fork with upstream...")
-		err = remoteDB.Sync()
-		sp.Stop()
-		if err != nil {
-			slog.Warn("fork sync skipped", "error", err)
+		if !noSync {
+			sp := style.StartSpinner(stderr, "Syncing fork with upstream...")
+			err = remoteDB.Sync()
+			sp.Stop()
+			if err != nil {
+				slog.Warn("fork sync skipped", "error", err)
+			}
 		}
 	}
 
@@ -312,6 +321,7 @@ func runServe(cmd *cobra.Command, stdout, stderr io.Writer) error {
 
 	server := newSelfHostedAPIServer(client)
 	server.SetEnvironment(environment)
+	server.SetCommonsQuerier(commonsRowQuerier{db: db})
 
 	scoreboardCache := api.NewScoreboardCache(db, 5*time.Minute)
 	server.SetScoreboard(scoreboardCache)
@@ -345,6 +355,38 @@ func runServe(cmd *cobra.Command, stdout, stderr io.Writer) error {
 	srv := &http.Server{Addr: addr, Handler: handler, MaxHeaderBytes: 1 << 20} //nolint:gosec // bind addr is user-controlled via --port flag
 	PrimeGitHubCacheAsync()
 	return serveListen(srv)
+}
+
+type commonsRowQuerier struct {
+	db commons.DB
+}
+
+func (q commonsRowQuerier) QueryRows(sql string) ([]map[string]any, error) {
+	output, err := q.db.Query(sql, "")
+	if err != nil {
+		return nil, err
+	}
+	records, err := csv.NewReader(strings.NewReader(output)).ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("parsing dolt csv: %w", err)
+	}
+	if len(records) == 0 {
+		return nil, nil
+	}
+	header := records[0]
+	rows := make([]map[string]any, 0, len(records)-1)
+	for _, record := range records[1:] {
+		row := make(map[string]any, len(header))
+		for i, name := range header {
+			if i < len(record) {
+				row[name] = record[i]
+			} else {
+				row[name] = ""
+			}
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
 }
 
 func runServeHosted(cmd *cobra.Command, stdout, _ io.Writer) error {
