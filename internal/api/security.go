@@ -14,7 +14,7 @@ func SecurityHeaders(next http.Handler) http.Handler {
 // SecurityHeadersWithConnectSrc wraps a handler with standard security response
 // headers plus optional extra connect-src origins.
 func SecurityHeadersWithConnectSrc(next http.Handler, extraConnectSrc ...string) http.Handler {
-	connectSrc := []string{"'self'", "https://*.ingest.us.sentry.io"}
+	connectSrc := []string{"'self'", "https://*.ingest.us.sentry.io", "https://events.gascity.com"}
 	for _, origin := range extraConnectSrc {
 		if normalized, ok := normalizeConnectSrcOrigin(origin); ok {
 			connectSrc = append(connectSrc, normalized)
