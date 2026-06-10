@@ -21,7 +21,7 @@ func TestSecurityHeaders(t *testing.T) {
 		header string
 		want   string
 	}{
-		{"Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.ingest.us.sentry.io; worker-src 'self' blob:; img-src 'self' data:"},
+		{"Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.ingest.us.sentry.io https://events.gascity.com; worker-src 'self' blob:; img-src 'self' data:"},
 		{"X-Frame-Options", "DENY"},
 		{"X-Content-Type-Options", "nosniff"},
 		{"Referrer-Policy", "strict-origin-when-cross-origin"},
@@ -47,7 +47,7 @@ func TestSecurityHeadersWithConnectSrc(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	got := rec.Header().Get("Content-Security-Policy")
-	want := "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.ingest.us.sentry.io https://auth.example; worker-src 'self' blob:; img-src 'self' data:"
+	want := "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.ingest.us.sentry.io https://events.gascity.com https://auth.example; worker-src 'self' blob:; img-src 'self' data:"
 	if got != want {
 		t.Fatalf("Content-Security-Policy = %q, want %q", got, want)
 	}
@@ -71,7 +71,7 @@ func TestSecurityHeadersWithConnectSrc_IgnoresInvalidOrigins(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	got := rec.Header().Get("Content-Security-Policy")
-	want := "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.ingest.us.sentry.io https://auth.example https://subpath.example; worker-src 'self' blob:; img-src 'self' data:"
+	want := "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.ingest.us.sentry.io https://events.gascity.com https://auth.example https://subpath.example; worker-src 'self' blob:; img-src 'self' data:"
 	if got != want {
 		t.Fatalf("Content-Security-Policy = %q, want %q", got, want)
 	}

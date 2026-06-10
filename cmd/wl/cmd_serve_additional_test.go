@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gastownhall/wasteland/internal/commons"
+	"github.com/gastownhall/wasteland/internal/federation"
 	"github.com/gastownhall/wasteland/internal/remote"
 	"github.com/gastownhall/wasteland/internal/sdk"
 	"github.com/spf13/cobra"
@@ -73,6 +75,52 @@ func TestHostedPublicUpstream_IsCanonical(t *testing.T) {
 	}
 	if hostedPublicUpstream != "hop/wl-commons" {
 		t.Fatalf("hostedPublicUpstream = %q", hostedPublicUpstream)
+	}
+}
+
+func TestRunServe_NoSyncSkipsLocalSyncAndPush(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("DOLTHUB_TOKEN", "token")
+	saveTestConfig(t, &federation.Config{
+		Upstream:  "hop/wl-commons",
+		ForkOrg:   "alice",
+		ForkDB:    "wl-commons",
+		LocalDir:  t.TempDir(),
+		RigHandle: "alice",
+		Backend:   federation.BackendLocal,
+		Mode:      federation.ModePR,
+		JoinedAt:  time.Now(),
+	})
+	installReviewDolt(t)
+
+	var syncCalls atomic.Int32
+	var pushCalls atomic.Int32
+	withLocalWorkflowDBOverride(t, func(string, string) localWorkflowDB {
+		return fakeLocalWorkflowDB{
+			pushMainFn: func(io.Writer) error {
+				pushCalls.Add(1)
+				return errors.New("push should be skipped")
+			},
+			scriptedDB: scriptedDB{
+				syncFunc: func() error {
+					syncCalls.Add(1)
+					return errors.New("sync should be skipped")
+				},
+				queryFunc: func(string, string) (string, error) { return "", nil },
+			},
+		}
+	})
+	withSelfHostedAPIServerOverride(t, func(client *sdk.Client) selfHostedAPIServer {
+		return &fakeSelfHostedServer{client: client}
+	})
+	withServeListenOverride(t, func(*http.Server) error { return nil })
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--wasteland", "hop/wl-commons", "serve", "--no-sync", "--port", "8125"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("run(serve --no-sync) = %d, stderr = %q", code, stderr.String())
+	}
+	if syncCalls.Load() != 0 || pushCalls.Load() != 0 {
+		t.Fatalf("sync calls = %d, push calls = %d", syncCalls.Load(), pushCalls.Load())
 	}
 }
 

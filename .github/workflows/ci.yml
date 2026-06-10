@@ -79,6 +79,12 @@ jobs:
         with:
           go-version-file: go.mod
       - uses: oven-sh/setup-bun@v2
+      - name: Install dolt
+        run: curl -fsSL -o /tmp/install-dolt.sh https://github.com/dolthub/dolt/releases/latest/download/install.sh && sudo bash /tmp/install-dolt.sh
+      - name: Configure dolt
+        run: |
+          dolt config --global --add user.email "ci@wasteland.dev"
+          dolt config --global --add user.name "CI"
       - name: Install web deps
         run: cd web && bun install --frozen-lockfile
       - name: Install Playwright browser

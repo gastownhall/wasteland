@@ -111,8 +111,12 @@ test("runs the real hosted PR-overlay lifecycle across three users and merges th
     await expect(
       alice.page.getByRole("heading", { name: title }),
     ).toBeVisible();
-    await expect(alice.page.getByText(bobEvidence)).toBeVisible();
-    await expect(alice.page.getByText(charlieEvidence)).toBeVisible();
+    await expect(
+      alice.page.getByText(bobEvidence, { exact: true }).first(),
+    ).toBeVisible();
+    await expect(
+      alice.page.getByText(charlieEvidence, { exact: true }).first(),
+    ).toBeVisible();
 
     const bobSubmission = alice.page
       .getByText(bobEvidence, { exact: true })
@@ -966,7 +970,9 @@ test("surfaces validated items in browse filters and detail views", async ({
     ).toBeTruthy();
 
     await alice.page.getByRole("link", { name: validatedTitle }).click();
-    await expect(alice.page.locator('[data-status="validated"]')).toBeVisible();
+    await expect(
+      alice.page.locator('[data-status="validated"]').first(),
+    ).toBeVisible();
   } finally {
     await Promise.all([alice.context.close()]);
     await api.dispose().catch(() => {});

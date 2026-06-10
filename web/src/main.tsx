@@ -8,6 +8,7 @@ import { loadRuntimeConfig } from "./api/runtimeConfig";
 import type { RuntimeConfigResponse } from "./api/types";
 import { Toaster } from "./components/Toaster";
 import { initBrowserTracing } from "./observability/browser";
+import { initOpenPanel } from "./observability/openpanel";
 import "./styles/global.css";
 
 function initSentry(runtimeConfig: RuntimeConfigResponse) {
@@ -46,6 +47,7 @@ async function start() {
   }
   startPrefetch();
   initSentry(runtimeConfig);
+  initOpenPanel(runtimeConfig);
 
   createRoot(document.getElementById("root")!).render(
     <StrictMode>

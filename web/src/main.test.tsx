@@ -6,6 +6,7 @@ const mocked = vi.hoisted(() => ({
   globalHandlersIntegration: vi.fn(() => "global-handlers"),
   loadRuntimeConfig: vi.fn(),
   initBrowserTracing: vi.fn(),
+  initOpenPanel: vi.fn(),
   startPrefetch: vi.fn(),
   createRoot: vi.fn(),
   render: vi.fn(),
@@ -21,6 +22,10 @@ vi.mock("./api/runtimeConfig", () => ({
 
 vi.mock("./observability/browser", () => ({
   initBrowserTracing: mocked.initBrowserTracing,
+}));
+
+vi.mock("./observability/openpanel", () => ({
+  initOpenPanel: mocked.initOpenPanel,
 }));
 
 vi.mock("./App", () => ({
@@ -55,6 +60,7 @@ describe("main", () => {
     mocked.globalHandlersIntegration.mockClear();
     mocked.loadRuntimeConfig.mockReset();
     mocked.initBrowserTracing.mockReset();
+    mocked.initOpenPanel.mockReset();
     mocked.startPrefetch.mockReset();
     mocked.createRoot.mockReset();
     mocked.render.mockReset();
@@ -87,6 +93,12 @@ describe("main", () => {
       browser_trace_sample_ratio: 0.3,
     });
     expect(mocked.startPrefetch).toHaveBeenCalled();
+    expect(mocked.initOpenPanel).toHaveBeenCalledWith({
+      environment: "staging",
+      browser_tracing_enabled: true,
+      browser_trace_endpoint: "/api/telemetry/v1/traces",
+      browser_trace_sample_ratio: 0.3,
+    });
     expect(mocked.createRoot).toHaveBeenCalledWith(document.getElementById("root"));
     expect(mocked.render).toHaveBeenCalled();
   }, 30000);
@@ -109,5 +121,11 @@ describe("main", () => {
       }),
     );
     expect(mocked.initBrowserTracing).not.toHaveBeenCalled();
+    expect(mocked.initOpenPanel).toHaveBeenCalledWith({
+      environment: "staging",
+      browser_tracing_enabled: false,
+      browser_trace_endpoint: "",
+      browser_trace_sample_ratio: 0,
+    });
   });
 });

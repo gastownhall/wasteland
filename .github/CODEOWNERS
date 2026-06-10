@@ -1,0 +1,15 @@
+# Sensitive areas requiring Wasteland project-admin ownership.
+/.github/CODEOWNERS @gastownhall/wasteland-admin
+/.github/workflows/ @gastownhall/wasteland-admin
+/.github/actions/ @gastownhall/wasteland-admin
+/.githooks/ @gastownhall/wasteland-admin
+/SECURITY.md @gastownhall/wasteland-admin
+/RELEASING.md @gastownhall/wasteland-admin
+/Makefile @gastownhall/wasteland-admin
+/go.mod @gastownhall/wasteland-admin
+/go.sum @gastownhall/wasteland-admin
+/Dockerfile* @gastownhall/wasteland-admin
+/.goreleaser.yml @gastownhall/wasteland-admin
+/scripts/ @gastownhall/wasteland-admin
+/web/package.json @gastownhall/wasteland-admin
+/web/package-lock.json @gastownhall/wasteland-admin
