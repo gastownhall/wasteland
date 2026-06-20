@@ -3,7 +3,7 @@ import type { RuntimeConfigResponse } from "../api/types";
 
 const defaultApiUrl = "https://events.gascity.com/api";
 const defaultClientId = "eb727ecb-d336-51ef-a590-49897d042825";
-const productionHosts = new Set(["wasteland.gastownhall.ai"]);
+const productionHosts = new Set(["wasteland.gascity.com"]);
 
 let openPanel: OpenPanel | null = null;
 
