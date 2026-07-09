@@ -11,6 +11,7 @@ type RigRow struct {
 	DisplayName  string `json:"display_name,omitempty"`
 	DolthubOrg   string `json:"dolthub_org,omitempty"`
 	TrustLevel   int    `json:"trust_level"`
+	TrustTier    string `json:"trust_tier"`
 	RegisteredAt string `json:"registered_at,omitempty"`
 	LastSeen     string `json:"last_seen,omitempty"`
 	RigType      string `json:"rig_type,omitempty"`
@@ -100,7 +101,32 @@ func QueryScoreboardDump(db DB) (*ScoreboardDump, error) {
 		return nil, fmt.Errorf("dumping badges: %w", err)
 	}
 
+	// Derive trust_tier for each rig from stamp weighted scores.
+	populateDumpTrustTiers(dump)
+
 	return dump, nil
+}
+
+// populateDumpTrustTiers computes weighted scores from stamps and sets
+// TrustTier on each RigRow, ensuring the dump uses the same tier labels
+// as the scoreboard API.
+func populateDumpTrustTiers(dump *ScoreboardDump) {
+	scores := make(map[string]int)
+	for _, s := range dump.Stamps {
+		weight := 0
+		switch s.Severity {
+		case "root":
+			weight = 5
+		case "branch":
+			weight = 3
+		case "leaf":
+			weight = 1
+		}
+		scores[s.Subject] += weight
+	}
+	for i := range dump.Rigs {
+		dump.Rigs[i].TrustTier = DeriveTrustTier(scores[dump.Rigs[i].Handle])
+	}
 }
 
 func queryDumpRigs(db DB) ([]RigRow, error) {

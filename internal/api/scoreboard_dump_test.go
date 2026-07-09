@@ -55,6 +55,9 @@ func TestScoreboardDump_Handler(t *testing.T) {
 	if result.Rigs[0].Handle != "alice" {
 		t.Errorf("rig handle = %q, want alice", result.Rigs[0].Handle)
 	}
+	if result.Rigs[0].TrustTier != "newcomer" {
+		t.Errorf("rig trust_tier = %q, want newcomer (1 root stamp = weight 5)", result.Rigs[0].TrustTier)
+	}
 	if len(result.Stamps) != 1 {
 		t.Errorf("stamps count = %d, want 1", len(result.Stamps))
 	}
