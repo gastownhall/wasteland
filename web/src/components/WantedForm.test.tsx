@@ -81,6 +81,25 @@ describe("WantedForm", () => {
     });
   });
 
+  it("edit mode: sends explicit empty strings when clearing description and project", async () => {
+    setActiveUpstream("hop/wl-commons");
+    const fetchFn = vi.fn<FetchFn>(() => ({ detail: null }));
+    cleanupFetch = mockFetch(fetchFn);
+    renderWithRouter(<WantedForm item={makeEditItem()} onClose={onClose} onSaved={onSaved} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Details, context, acceptance criteria..."), {
+      target: { value: "   " },
+    });
+    fireEvent.change(screen.getByPlaceholderText("project name"), { target: { value: "" } });
+    fireEvent.click(screen.getByText("Update"));
+
+    await waitFor(() => {
+      const patch = fetchFn.mock.calls.find(([, init]) => init?.method === "PATCH");
+      expect(patch).toBeDefined();
+      expect(JSON.parse(patch?.[1]?.body as string)).toMatchObject({ description: "", project: "" });
+    });
+  });
+
   it("parses tags from comma-separated input", async () => {
     setActiveUpstream("hop/wl-commons");
     const fetchFn = vi.fn<FetchFn>(() => ({ detail: null }));

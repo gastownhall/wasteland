@@ -44,8 +44,8 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&title, "title", "", "New title")
-	cmd.Flags().StringVarP(&description, "description", "d", "", "New description")
-	cmd.Flags().StringVar(&project, "project", "", "New project")
+	cmd.Flags().StringVarP(&description, "description", "d", "", "New description (empty string clears)")
+	cmd.Flags().StringVar(&project, "project", "", "New project (empty string clears)")
 	cmd.Flags().StringVar(&itemType, "type", "", "Item type: feature, bug, design, rfc, docs")
 	cmd.Flags().IntVar(&priority, "priority", -1, "Priority: 0=critical, 1=high, 2=medium, 3=low, 4=backlog")
 	cmd.Flags().StringVar(&effort, "effort", "", "Effort level: trivial, small, medium, large, epic")
@@ -64,12 +64,14 @@ func runUpdate(cmd *cobra.Command, stdout, _ io.Writer, wantedID, title, descrip
 	}
 
 	fields := &commons.WantedUpdate{
-		Title:       title,
-		Description: description,
-		Project:     project,
-		Type:        itemType,
-		Priority:    priority,
-		EffortLevel: effort,
+		Title:          title,
+		Description:    description,
+		DescriptionSet: cmd.Flags().Changed("description"),
+		Project:        project,
+		ProjectSet:     cmd.Flags().Changed("project"),
+		Type:           itemType,
+		Priority:       priority,
+		EffortLevel:    effort,
 	}
 
 	if tags != "" {
@@ -116,7 +118,7 @@ func runUpdate(cmd *cobra.Command, stdout, _ io.Writer, wantedID, title, descrip
 
 // hasUpdateFields returns true if at least one field is set.
 func hasUpdateFields(f *commons.WantedUpdate) bool {
-	return f.Title != "" || f.Description != "" || f.Project != "" ||
+	return f.Title != "" || f.Description != "" || f.DescriptionSet || f.Project != "" || f.ProjectSet ||
 		f.Type != "" || f.Priority >= 0 || f.EffortLevel != "" || f.TagsSet
 }
 

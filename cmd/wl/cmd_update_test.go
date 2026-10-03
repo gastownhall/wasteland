@@ -1,10 +1,13 @@
 package main
 
 import (
+	"io"
 	"strings"
 	"testing"
 
 	"github.com/gastownhall/wasteland/internal/commons"
+	"github.com/gastownhall/wasteland/internal/federation"
+	"github.com/gastownhall/wasteland/internal/sdk"
 )
 
 // Business logic tests for updating moved to internal/sdk/ (sdk_test.go, lifecycle_test.go).
@@ -48,6 +51,47 @@ func TestValidateUpdateInputs(t *testing.T) {
 	}
 }
 
+func TestUpdateCommand_ExplicitEmptyTextFields(t *testing.T) {
+	for _, tt := range []struct {
+		name                 string
+		args                 []string
+		description, project bool
+	}{
+		{"description", []string{"--description="}, true, false},
+		{"project", []string{"--project="}, false, true},
+		{"both", []string{"--description=", "--project="}, true, true},
+		{"omitted", []string{"--title=New title"}, false, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			saveHandlerConfig(t)
+			withResolveWantedArgOverride(t, func(_ *federation.Config, id string) (string, error) { return id, nil })
+			called := false
+			withCommandClientOverride(t, func(_ *federation.Config, _ bool) (commandClient, error) {
+				return fakeCommandClient{updateFn: func(wantedID string, fields *commons.WantedUpdate) (*sdk.MutationResult, error) {
+					called = true
+					dml, err := commons.UpdateWantedDML(wantedID, fields)
+					if err != nil {
+						t.Fatalf("UpdateWantedDML() error = %v", err)
+					}
+					if strings.Contains(dml, "description=''") != tt.description || strings.Contains(dml, "project=''") != tt.project {
+						t.Fatalf("unexpected clear assignments in %s", dml)
+					}
+					return &sdk.MutationResult{}, nil
+				}}, nil
+			})
+			cmd := newUpdateCmd(io.Discard, io.Discard)
+			cmd.SilenceErrors, cmd.SilenceUsage = true, true
+			cmd.SetArgs(append([]string{"w-1"}, tt.args...))
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("update command error = %v", err)
+			}
+			if !called {
+				t.Fatal("expected Update to be called")
+			}
+		})
+	}
+}
+
 func TestHasUpdateFields(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -57,6 +101,8 @@ func TestHasUpdateFields(t *testing.T) {
 	}{
 		{"empty", &commons.WantedUpdate{Priority: -1}, false},
 		{"title set", &commons.WantedUpdate{Title: "new", Priority: -1}, true},
+		{"clear description", &commons.WantedUpdate{Priority: -1, DescriptionSet: true}, true},
+		{"clear project", &commons.WantedUpdate{Priority: -1, ProjectSet: true}, true},
 		{"priority set", &commons.WantedUpdate{Priority: 0}, true},
 		{"tags set", &commons.WantedUpdate{Priority: -1, TagsSet: true}, true},
 		{"effort set", &commons.WantedUpdate{Priority: -1, EffortLevel: "small"}, true},

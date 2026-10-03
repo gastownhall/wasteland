@@ -767,6 +767,18 @@ func TestPostAndUpdate(t *testing.T) {
 	if db.pushCalls != 2 {
 		t.Fatalf("pushCalls = %d, want 2 after update", db.pushCalls)
 	}
+	if updated.Detail.Item.Project != "hop" {
+		t.Fatalf("omitted project = %q, want hop", updated.Detail.Item.Project)
+	}
+	cleared, err := c.Update(posted.Detail.Item.ID, &commons.WantedUpdate{
+		Priority: -1, DescriptionSet: true, ProjectSet: true,
+	})
+	if err != nil {
+		t.Fatalf("Update() clearing optional text error = %v", err)
+	}
+	if cleared.Detail.Item.Description != "" || cleared.Detail.Item.Project != "" {
+		t.Fatalf("optional text was not cleared: %+v", cleared.Detail.Item)
+	}
 }
 
 func TestClearBranchDataAndExtractWantedID(t *testing.T) {

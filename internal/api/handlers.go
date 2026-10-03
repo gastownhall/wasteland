@@ -508,13 +508,19 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	fields := &commons.WantedUpdate{
 		Title:       req.Title,
-		Description: req.Description,
-		Project:     req.Project,
 		Type:        req.Type,
 		Priority:    -1,
 		EffortLevel: req.EffortLevel,
 		Tags:        req.Tags,
 		TagsSet:     req.TagsSet,
+	}
+	if req.Description != nil {
+		fields.Description = *req.Description
+		fields.DescriptionSet = true
+	}
+	if req.Project != nil {
+		fields.Project = *req.Project
+		fields.ProjectSet = true
 	}
 	if req.Priority != nil {
 		fields.Priority = *req.Priority

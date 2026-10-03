@@ -62,7 +62,7 @@ func (f *fakeDB) Query(sql, ref string) (string, error) {
 	}
 
 	switch {
-	case strings.Contains(sql, "FROM wanted") && strings.Contains(sql, "WHERE id"):
+	case strings.Contains(sql, "FROM wanted") && (strings.Contains(sql, "WHERE id") || strings.Contains(sql, "WHERE w.id")):
 		return f.queryByID(sql, ref)
 	case strings.Contains(sql, "FROM wanted"):
 		return f.queryBrowse(sql, ref)
@@ -200,6 +200,12 @@ func (f *fakeDB) applyDML(stmt, branch string) {
 		it.status = "completed"
 	case strings.Contains(setClause, "status='withdrawn'"):
 		it.status = "withdrawn"
+	}
+	if strings.Contains(setClause, "description='") {
+		it.description = extractVal(stmt, "description='")
+	}
+	if strings.Contains(setClause, "project='") {
+		it.project = extractVal(stmt, "project='")
 	}
 }
 
@@ -966,6 +972,36 @@ func TestUpdate_Handler_NoFields(t *testing.T) {
 	}
 	if !strings.Contains(resp.Error, "no fields to update") {
 		t.Errorf("unexpected error: %s", resp.Error)
+	}
+}
+
+func TestUpdate_Handler_OptionalTextFields(t *testing.T) {
+	for _, tt := range []struct {
+		name, body, description, project string
+	}{
+		{"clear both", `{"description":"","project":""}`, "", ""},
+		{"clear description", `{"description":""}`, "", "existing project"},
+		{"clear project", `{"project":""}`, "existing description", ""},
+		{"omitted", `{"title":"New title"}`, "existing description", "existing project"},
+		{"null is omitted", `{"description":null,"project":null,"title":"New title"}`, "existing description", "existing project"},
+		{"replace", `{"description":"New description","project":"New project"}`, "New description", "New project"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			db := newFakeDB()
+			db.items["w-1"] = &fakeItem{id: "w-1", title: "Fix bug", description: "existing description", project: "existing project", status: "open", postedBy: "alice", effortLevel: "medium"}
+			ts := newTestServer(db, "wild-west")
+			defer ts.Close()
+
+			r := doRequest(t, ts, "PATCH", "/api/wanted/w-1", tt.body, nil)
+			if r.StatusCode != http.StatusOK {
+				t.Fatalf("expected 200, got %d", r.StatusCode)
+			}
+			var detail DetailResponse
+			getJSON(t, ts, "/api/wanted/w-1", &detail)
+			if detail.Item.Description != tt.description || detail.Item.Project != tt.project {
+				t.Fatalf("persisted description/project = %q/%q, want %q/%q", detail.Item.Description, detail.Item.Project, tt.description, tt.project)
+			}
+		})
 	}
 }
 

@@ -215,8 +215,8 @@ type PostRequest struct {
 // UpdateRequest is the JSON body for PATCH /api/wanted/{id}.
 type UpdateRequest struct {
 	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Project     string   `json:"project"`
+	Description *string  `json:"description"` // nil leaves unchanged; empty string clears
+	Project     *string  `json:"project"`     // nil leaves unchanged; empty string clears
 	Type        string   `json:"type"`
 	Priority    *int     `json:"priority"` // pointer so 0 is distinguishable from unset
 	EffortLevel string   `json:"effort_level"`

@@ -372,6 +372,39 @@ func TestUpdateWantedDML_RequiresFieldsAndSupportsExplicitEmptyTags(t *testing.T
 	}
 }
 
+func TestUpdateWantedDML_OptionalTextFields(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name       string
+		fields     WantedUpdate
+		want, omit []string
+	}{
+		{"clear description", WantedUpdate{Priority: -1, DescriptionSet: true}, []string{"description=''"}, []string{"project="}},
+		{"clear project", WantedUpdate{Priority: -1, ProjectSet: true}, []string{"project=''"}, []string{"description="}},
+		{"clear both", WantedUpdate{Priority: -1, DescriptionSet: true, ProjectSet: true}, []string{"description=''", "project=''"}, nil},
+		{"omitted", WantedUpdate{Priority: -1, Title: "New title"}, []string{"title='New title'"}, []string{"description=", "project="}},
+		{"nonempty without flags", WantedUpdate{Priority: -1, Description: "New description", Project: "New project"}, []string{"description='New description'", "project='New project'"}, nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dml, err := UpdateWantedDML("w-1", &tt.fields)
+			if err != nil {
+				t.Fatalf("UpdateWantedDML() error = %v", err)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(dml, want) {
+					t.Errorf("missing %q in %s", want, dml)
+				}
+			}
+			for _, omit := range tt.omit {
+				if strings.Contains(dml, omit) {
+					t.Errorf("unexpected %q in %s", omit, dml)
+				}
+			}
+		})
+	}
+}
+
 func TestAcceptAndCloseUpstreamDML_AdoptForkCompletion(t *testing.T) {
 	t.Parallel()
 

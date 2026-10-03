@@ -197,17 +197,19 @@ type Stamp struct {
 }
 
 // WantedUpdate holds the mutable fields for updating a wanted item.
-// Zero-value fields are treated as "not set" and will not be updated.
+// Zero-value fields are treated as "not set" unless their Set flag is true.
 // Priority uses -1 as "not set" since 0 is a valid priority.
 type WantedUpdate struct {
-	Title       string
-	Description string
-	Project     string
-	Type        string
-	Priority    int
-	EffortLevel string
-	Tags        []string
-	TagsSet     bool // true if Tags was explicitly provided (even if empty)
+	Title          string
+	Description    string
+	DescriptionSet bool // true if Description was explicitly provided (even if empty)
+	Project        string
+	ProjectSet     bool // true if Project was explicitly provided (even if empty)
+	Type           string
+	Priority       int
+	EffortLevel    string
+	Tags           []string
+	TagsSet        bool // true if Tags was explicitly provided (even if empty)
 }
 
 // ConflictError indicates an optimistic concurrency conflict (e.g. item was
@@ -786,10 +788,10 @@ func UpdateWantedDML(wantedID string, fields *WantedUpdate) (string, error) {
 	if fields.Title != "" {
 		setClauses = append(setClauses, fmt.Sprintf("title='%s'", EscapeSQL(fields.Title)))
 	}
-	if fields.Description != "" {
+	if fields.Description != "" || fields.DescriptionSet {
 		setClauses = append(setClauses, fmt.Sprintf("description='%s'", EscapeSQL(fields.Description)))
 	}
-	if fields.Project != "" {
+	if fields.Project != "" || fields.ProjectSet {
 		setClauses = append(setClauses, fmt.Sprintf("project='%s'", EscapeSQL(fields.Project)))
 	}
 	if fields.Type != "" {

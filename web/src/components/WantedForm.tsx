@@ -90,8 +90,8 @@ export function WantedForm({ item, mode = "default", onClose, onSaved }: WantedF
           .filter(Boolean);
         resp = await updateItem(item.id, {
           title: title.trim(),
-          description: description.trim() || undefined,
-          project: project.trim() || undefined,
+          description: description.trim(),
+          project: project.trim(),
           type,
           priority,
           effort_level: effortLevel,

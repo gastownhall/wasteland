@@ -394,11 +394,11 @@ func (f *fakeDB) applyUpdateWanted(stmt string, target map[string]*fakeItem) boo
 		item.Title = t
 		changed = true
 	}
-	if d := extractSetValue(stmt, "description"); d != "" {
+	if d := extractSetValue(stmt, "description"); d != "" || strings.Contains(setClause, "description=''") {
 		item.Description = d
 		changed = true
 	}
-	if p := extractSetValue(stmt, "project"); p != "" {
+	if p := extractSetValue(stmt, "project"); p != "" || strings.Contains(setClause, "project=''") {
 		item.Project = p
 		changed = true
 	}
