@@ -1,6 +1,6 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocked = vi.hoisted(() => ({
@@ -46,13 +46,21 @@ vi.mock("./ShortcutHelp", () => ({
 
 import { Layout } from "./Layout";
 
+function LocationProbe() {
+  const { pathname, search, hash } = useLocation();
+  return <div data-testid="location">{pathname + search + hash}</div>;
+}
+
 function renderLayout(initialEntry = "/") {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
+      <LocationProbe />
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<div data-testid="outlet">Board</div>} />
           <Route path="/connect" element={<div data-testid="outlet">Connect</div>} />
+          <Route path="/join" element={<div data-testid="outlet">Join</div>} />
+          <Route path="/wanted/:id" element={<div data-testid="outlet">Wanted</div>} />
           <Route path="/settings" element={<div data-testid="outlet">Settings</div>} />
           <Route path="/me" element={<div data-testid="outlet">Dashboard</div>} />
           <Route path="/profile" element={<div data-testid="outlet">Profiles</div>} />
@@ -109,6 +117,54 @@ describe("Layout", () => {
     expect(screen.getByRole("link", { name: "connect" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "settings" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "me" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { authenticated: false, label: "sign in" },
+    { authenticated: true, label: "connect" },
+  ])("preserves the wanted item URL when clicking $label", async ({ authenticated, label }) => {
+    mocked.wastelandState.authenticated = authenticated;
+    const returnTo = "/wanted/item-1?tab=activity&filter=needs%20review#comment-2";
+    renderLayout(returnTo);
+
+    await userEvent.click(screen.getByRole("link", { name: label }));
+
+    const destination = new URL(screen.getByTestId("location").textContent ?? "", "https://wasteland.test");
+    expect(destination.pathname).toBe("/connect");
+    expect(destination.searchParams.get("return_to")).toBe(returnTo);
+    expect(destination.hash).toBe("");
+  });
+
+  it.each([
+    "/connect",
+    "/join",
+    "/connect/",
+    "/join/",
+  ])("keeps the existing return destination when signing in from %s", async (path) => {
+    const queryAndHash = "?return_to=%2Fwanted%2Fitem-1%3Ftab%3Dactivity%23comment-2&reason=expired#credentials";
+    renderLayout(path + queryAndHash);
+
+    await userEvent.click(screen.getByRole("link", { name: "sign in" }));
+
+    expect(screen.getByTestId("location").textContent).toBe(`/connect${queryAndHash}`);
+  });
+
+  it("keeps a direct connect page standalone", async () => {
+    renderLayout("/connect");
+
+    await userEvent.click(screen.getByRole("link", { name: "sign in" }));
+
+    expect(screen.getByTestId("location").textContent).toBe("/connect");
+  });
+
+  it("uses the current page after navigating before signing in", async () => {
+    renderLayout("/wanted/item-1?tab=activity#comment-2");
+
+    await userEvent.click(screen.getByRole("link", { name: "profiles" }));
+    await userEvent.click(screen.getByRole("link", { name: "sign in" }));
+
+    const destination = new URL(screen.getByTestId("location").textContent ?? "", "https://wasteland.test");
+    expect(destination.searchParams.get("return_to")).toBe("/profile");
   });
 
   it("shows authenticated navigation and switches wastelands", async () => {

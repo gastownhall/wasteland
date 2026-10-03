@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { getImpersonation, setImpersonation } from "../api/client";
 import { useWasteland } from "../context/WastelandContext";
 import { CommandsContext, useCommandRegistry } from "../hooks/useCommands";
@@ -14,7 +14,13 @@ export function Layout() {
   const [impersonating, setImpersonating] = useState<string>(getImpersonation() ?? "");
   const [impersonateInput, setImpersonateInput] = useState(getImpersonation() ?? "");
   const navigate = useNavigate();
+  const location = useLocation();
   const { wastelands, active, authenticated, connected, environment, switchTo } = useWasteland();
+
+  // Keep the original destination when the persistent nav is clicked during sign-in.
+  const connectTo = /^\/(connect|join)\/?$/.test(location.pathname)
+    ? `/connect${location.search}${location.hash}`
+    : `/connect?return_to=${encodeURIComponent(location.pathname + location.search + location.hash)}`;
 
   const { register, getCommands, subscribe } = useCommandRegistry();
   const commands = useSyncExternalStore(subscribe, getCommands);
@@ -158,7 +164,7 @@ export function Layout() {
               settings
             </NavLink>
           ) : (
-            <NavLink to="/connect" className={({ isActive }) => (isActive ? styles.navLinkActive : styles.navLink)}>
+            <NavLink to={connectTo} className={({ isActive }) => (isActive ? styles.navLinkActive : styles.navLink)}>
               {authenticated ? "connect" : "sign in"}
             </NavLink>
           )}

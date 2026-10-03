@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConnectSessionInput } from "../api/types";
 import { ConnectPage } from "./ConnectPage";
@@ -59,9 +59,15 @@ vi.mock("sonner", () => ({
   },
 }));
 
+function LocationProbe() {
+  const { pathname, search, hash } = useLocation();
+  return <div data-testid="location">{pathname + search + hash}</div>;
+}
+
 function renderConnect(initialEntry: string) {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
+      <LocationProbe />
       <Routes>
         <Route path="/connect" element={<ConnectPage />} />
         <Route path="/join" element={<ConnectPage />} />
@@ -187,7 +193,8 @@ describe("ConnectPage", () => {
     mocked.notifyConnect.mockResolvedValue({ setup_warning: "Grant SQL permissions" });
     mocked.refresh.mockResolvedValue(undefined);
 
-    renderConnect("/connect?return_to=/wanted/item-1");
+    const returnTo = "/wanted/item-1?tab=activity&filter=needs%20review#comment-2";
+    renderConnect(`/connect?return_to=${encodeURIComponent(returnTo)}`);
 
     await waitFor(() => expect(screen.getByPlaceholderText("alice-dev")).toBeInTheDocument(), { timeout: 5000 });
     fireEvent.change(screen.getByPlaceholderText("alice-dev"), { target: { value: "alice-dev" } });
@@ -232,6 +239,7 @@ describe("ConnectPage", () => {
     expect(mocked.toastWarning).toHaveBeenCalledWith("Grant SQL permissions");
     expect(mocked.toastSuccess).toHaveBeenCalledWith("Connected to DoltHub");
     await waitFor(() => expect(screen.getByTestId("wanted")).toBeInTheDocument());
+    expect(screen.getByTestId("location").textContent).toBe(returnTo);
   }, 10000);
 
   it("connects with advanced overrides", async () => {
