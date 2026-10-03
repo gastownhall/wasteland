@@ -255,10 +255,15 @@ export function ConnectPage() {
                 >
                   dolthub.com/settings/tokens
                 </a>{" "}
-                with <strong>database</strong>, <strong>pull request</strong>, <strong>SQL</strong>, and{" "}
-                <strong>branch</strong> permissions
+                with write access for the <strong>database</strong>, <strong>pull request</strong>, <strong>SQL</strong>
+                , and <strong>branch</strong> permissions
               </li>
             </ol>
+            <p className={styles.prose}>
+              For automatic first-time setup, choose <strong>All databases</strong> so the token covers the new fork
+              Wasteland creates. This option covers all current and future databases you own.{" "}
+              <strong>Selected databases</strong> restricts access to the databases you select.
+            </p>
           </div>
 
           {/* Credentials */}
