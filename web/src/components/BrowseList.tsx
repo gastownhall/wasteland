@@ -28,6 +28,7 @@ export function BrowseList() {
   const selectedIndexRef = useRef(-1);
   const searchRef = useRef<HTMLInputElement>(null);
   const hasLoadedRef = useRef(false);
+  const latestRequestRef = useRef(0);
 
   const setSelection = useCallback((next: number) => {
     selectedIndexRef.current = next;
@@ -36,6 +37,7 @@ export function BrowseList() {
 
   const load = useCallback(async () => {
     if (!ready) return;
+    const requestId = ++latestRequestRef.current;
     if (!hasLoadedRef.current) setLoading(true);
     setError("");
     setWarning("");
@@ -43,21 +45,27 @@ export function BrowseList() {
       // On first load with default filters, use prefetched data if available.
       const prefetched = !hasLoadedRef.current ? consumePrefetch(active) : null;
       const resp = (prefetched && (await prefetched)) || (await browse(filter));
+      if (requestId !== latestRequestRef.current) return;
       setItems(resp.items);
       if (resp.warning) setWarning(resp.warning);
       setSelection(-1);
       hasLoadedRef.current = true;
     } catch (e) {
+      if (requestId !== latestRequestRef.current) return;
       const msg = e instanceof Error ? e.message : "Failed to load";
       setError(msg);
       toast.error(msg);
     } finally {
-      setLoading(false);
+      if (requestId === latestRequestRef.current) setLoading(false);
     }
   }, [active, filter, ready, setSelection]);
 
   useEffect(() => {
     load();
+    // Invalidate pending loads and polls when filters/upstream change or we leave the board.
+    return () => {
+      latestRequestRef.current += 1;
+    };
   }, [load]);
 
   // Silent background poll — no loading spinner, no error toasts.
@@ -65,8 +73,10 @@ export function BrowseList() {
     if (!ready || loading || !hasLoadedRef.current) return;
     const id = setInterval(() => {
       if (document.hidden) return;
+      const requestId = ++latestRequestRef.current;
       browse(filter)
         .then((resp) => {
+          if (requestId !== latestRequestRef.current) return;
           setItems(resp.items);
           setSelection(-1);
         })

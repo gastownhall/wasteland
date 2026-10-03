@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setActiveUpstream } from "../api/client";
 import { CommandsContext } from "../hooks/useCommands";
@@ -7,6 +8,14 @@ import { makeBrowseResponse, makeSummary, mockFetch } from "../test-utils";
 import { BrowseList } from "./BrowseList";
 
 const defaultCommands = { commands: [], register: () => () => {} };
+
+function deferredResponse() {
+  let resolve!: (response: ReturnType<typeof makeBrowseResponse> | Response) => void;
+  const promise = new Promise<ReturnType<typeof makeBrowseResponse> | Response>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 vi.mock("../context/WastelandContext", () => ({
   useWasteland: () => ({
@@ -74,6 +83,57 @@ describe("BrowseList", () => {
     cleanupFetch = mockFetch(() => new Response(JSON.stringify({ error: "server error" }), { status: 500 }));
     renderBrowse();
     await waitFor(() => expect(screen.getByText("server error")).toBeInTheDocument());
+  });
+
+  it("keeps the latest search results when an older search finishes later", async () => {
+    const older = deferredResponse();
+    cleanupFetch = mockFetch((url) => {
+      const search = new URL(url, "https://wasteland.test").searchParams.get("search");
+      if (search === "older") return older.promise;
+      if (search === "latest") return makeBrowseResponse([makeSummary({ id: "latest", title: "Latest result" })]);
+      return makeBrowseResponse([makeSummary({ id: "initial", title: "Initial result" })]);
+    });
+    renderBrowse();
+    await waitFor(() => expect(screen.getAllByText("Initial result").length).toBeGreaterThan(0));
+
+    fireEvent.change(screen.getByLabelText("Search items"), { target: { value: "older" } });
+    fireEvent.change(screen.getByLabelText("Search items"), { target: { value: "latest" } });
+    await waitFor(() => expect(screen.getAllByText("Latest result").length).toBeGreaterThan(0));
+    await act(async () => {
+      older.resolve({
+        items: [makeSummary({ id: "older", title: "Older result" })],
+        warning: "Obsolete cached response",
+      });
+    });
+
+    expect(screen.getByLabelText("Search items")).toHaveValue("latest");
+    expect(screen.getAllByText("Latest result").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Older result")).not.toBeInTheDocument();
+    expect(screen.queryByText("Obsolete cached response")).not.toBeInTheDocument();
+  });
+
+  it("ignores an older search failure after the latest search succeeds", async () => {
+    const older = deferredResponse();
+    const toastError = vi.spyOn(toast, "error");
+    cleanupFetch = mockFetch((url) => {
+      const search = new URL(url, "https://wasteland.test").searchParams.get("search");
+      if (search === "older") return older.promise;
+      if (search === "latest") return makeBrowseResponse([makeSummary({ id: "latest", title: "Latest result" })]);
+      return makeBrowseResponse([makeSummary({ id: "initial", title: "Initial result" })]);
+    });
+    renderBrowse();
+    await waitFor(() => expect(screen.getAllByText("Initial result").length).toBeGreaterThan(0));
+
+    fireEvent.change(screen.getByLabelText("Search items"), { target: { value: "older" } });
+    fireEvent.change(screen.getByLabelText("Search items"), { target: { value: "latest" } });
+    await waitFor(() => expect(screen.getAllByText("Latest result").length).toBeGreaterThan(0));
+    await act(async () => {
+      older.resolve(new Response(JSON.stringify({ error: "Obsolete search failure" }), { status: 500 }));
+    });
+
+    expect(screen.getAllByText("Latest result").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Obsolete search failure")).not.toBeInTheDocument();
+    expect(toastError).not.toHaveBeenCalled();
   });
 
   it("shows a non-fatal warning when browse returns cached data", async () => {
@@ -351,5 +411,46 @@ describe("BrowseList", () => {
     await waitFor(() => expect(calls).toBeGreaterThanOrEqual(2));
     await waitFor(() => expect(screen.getAllByText("Polled Task").length).toBeGreaterThan(0));
     expect(calls).toBeGreaterThanOrEqual(2);
+  });
+
+  it("keeps new search results when an in-flight poll for old filters finishes", async () => {
+    const olderPoll = deferredResponse();
+    let initialFilterCalls = 0;
+    let poll: (() => void) | undefined;
+    vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+    const realSetInterval = globalThis.setInterval;
+    vi.spyOn(globalThis, "setInterval").mockImplementation(((callback: TimerHandler, delay?: number) => {
+      if (delay === 30_000) {
+        poll = callback as () => void;
+        return 1 as unknown as ReturnType<typeof setInterval>;
+      }
+      return realSetInterval(callback, delay);
+    }) as typeof setInterval);
+    cleanupFetch = mockFetch((url) => {
+      if (new URL(url, "https://wasteland.test").searchParams.get("search") === "latest") {
+        return makeBrowseResponse([makeSummary({ id: "latest", title: "Latest result" })]);
+      }
+      initialFilterCalls += 1;
+      if (initialFilterCalls === 1)
+        return makeBrowseResponse([makeSummary({ id: "initial", title: "Initial result" })]);
+      return olderPoll.promise;
+    });
+    renderBrowse();
+    await waitFor(() => expect(screen.getAllByText("Initial result").length).toBeGreaterThan(0));
+    await waitFor(() => expect(poll).toBeTypeOf("function"));
+
+    await act(async () => {
+      poll?.();
+    });
+    expect(initialFilterCalls).toBe(2);
+    fireEvent.change(screen.getByLabelText("Search items"), { target: { value: "latest" } });
+    await waitFor(() => expect(screen.getAllByText("Latest result").length).toBeGreaterThan(0));
+    await act(async () => {
+      olderPoll.resolve(makeBrowseResponse([makeSummary({ id: "older", title: "Older polled result" })]));
+    });
+
+    expect(screen.getByLabelText("Search items")).toHaveValue("latest");
+    expect(screen.getAllByText("Latest result").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Older polled result")).not.toBeInTheDocument();
   });
 });
