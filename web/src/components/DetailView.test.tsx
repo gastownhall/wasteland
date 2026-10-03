@@ -1,6 +1,6 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setActiveUpstream } from "../api/client";
 import { CommandsContext } from "../hooks/useCommands";
@@ -38,17 +38,30 @@ import { DetailView } from "./DetailView";
 
 const defaultCommands = { commands: [], register: () => () => {} };
 
-function renderDetail(id = "item-1") {
-  return render(
+function DetailTestApp({ id = "item-1" }: { id?: string }) {
+  return (
     <MemoryRouter initialEntries={[`/wanted/${id}`]}>
       <CommandsContext.Provider value={defaultCommands}>
+        <Link to="/wanted/item-2">Next item</Link>
         <Routes>
           <Route path="/wanted/:id" element={<DetailView />} />
           <Route path="/" element={<div data-testid="home">Home</div>} />
         </Routes>
       </CommandsContext.Provider>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+}
+
+function renderDetail(id = "item-1") {
+  return render(<DetailTestApp id={id} />);
+}
+
+function deferredResponse() {
+  let resolve!: (response: object) => void;
+  const promise = new Promise<object>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
 }
 
 let cleanupFetch: () => void;
@@ -104,6 +117,120 @@ describe("DetailView", () => {
     });
     renderDetail();
     await waitFor(() => expect(screen.getByText("not found")).toBeInTheDocument());
+  });
+
+  it.each(["route", "wasteland"])("ignores a previous detail request after changing %s", async (context) => {
+    const older = deferredResponse();
+    const current = deferredResponse();
+    let calls = 0;
+    cleanupFetch = mockFetch(() => (++calls === 1 ? older.promise : current.promise));
+    const view = renderDetail();
+
+    if (context === "route") {
+      fireEvent.click(screen.getByRole("link", { name: "Next item" }));
+    } else {
+      mocked.wastelandState.active = "other/wl-commons";
+      setActiveUpstream("other/wl-commons");
+      view.rerender(<DetailTestApp />);
+    }
+    expect(calls).toBe(2);
+    const oldDetail = makeDetailResponse({ item: makeItem({ title: "Old context task" }) });
+    const currentDetail = makeDetailResponse({ item: makeItem({ title: "Current context task" }) });
+
+    if (context === "route") {
+      await act(async () => older.resolve(oldDetail));
+      expect(screen.queryByText("Old context task")).not.toBeInTheDocument();
+      expect(screen.queryByText("Not found.")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "claim" })).not.toBeInTheDocument();
+      await act(async () => current.resolve(currentDetail));
+    } else {
+      await act(async () => current.resolve(currentDetail));
+      expect(screen.getByText("Current context task")).toBeInTheDocument();
+      await act(async () => older.resolve(oldDetail));
+    }
+
+    expect(screen.getByText("Current context task")).toBeInTheDocument();
+    expect(screen.queryByText("Old context task")).not.toBeInTheDocument();
+  });
+
+  it("does not navigate or toast when a previous item's delete finishes", async () => {
+    setActiveUpstream("hop/wl-commons");
+    const pendingDelete = deferredResponse();
+    cleanupFetch = mockFetch((url, init) => {
+      if (init?.method === "DELETE") return pendingDelete.promise;
+      return makeDetailResponse({
+        item: makeItem({ title: url.endsWith("item-2") ? "Current task" : "Previous task" }),
+        actions: ["delete"],
+      });
+    });
+    renderDetail();
+    await waitFor(() => expect(screen.getByText("Previous task")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    fireEvent.click(screen.getByRole("link", { name: "Next item" }));
+    await waitFor(() => expect(screen.getByText("Current task")).toBeInTheDocument());
+
+    await act(async () => pendingDelete.resolve({ detail: null }));
+
+    expect(screen.getByText("Current task")).toBeInTheDocument();
+    expect(screen.queryByTestId("home")).not.toBeInTheDocument();
+    expect(mocked.toastSuccess).not.toHaveBeenCalled();
+  });
+
+  it("does not refetch a previous item when its action returns a conflict", async () => {
+    setActiveUpstream("hop/wl-commons");
+    const pendingClaim = deferredResponse();
+    const reads: string[] = [];
+    cleanupFetch = mockFetch((url, init) => {
+      if (init?.method === "POST") return pendingClaim.promise;
+      reads.push(url);
+      return makeDetailResponse({
+        item: makeItem({ title: url.endsWith("item-2") ? "Current task" : "Previous task" }),
+      });
+    });
+    renderDetail();
+    await waitFor(() => expect(screen.getByText("Previous task")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "claim" }));
+    fireEvent.click(screen.getByRole("link", { name: "Next item" }));
+    await waitFor(() => expect(screen.getByText("Current task")).toBeInTheDocument());
+
+    await act(async () => {
+      pendingClaim.resolve(new Response(JSON.stringify({ error: "already claimed" }), { status: 409 }));
+    });
+
+    expect(reads).toEqual(["/api/wanted/item-1", "/api/wanted/item-2"]);
+    expect(screen.getByText("Current task")).toBeInTheDocument();
+    expect(mocked.toastError).not.toHaveBeenCalled();
+  });
+
+  it("resets open done, edit, and confirmation forms when the detail context changes", async () => {
+    cleanupFetch = mockFetch((url, init) => {
+      const upstream = new Headers(init?.headers).get("X-Wasteland");
+      const title = url.endsWith("item-2") ? "Next task" : upstream ? "Other wasteland task" : "Original task";
+      return makeDetailResponse({ item: makeItem({ title }), actions: ["done", "close"] });
+    });
+    const view = renderDetail();
+    await waitFor(() => expect(screen.getByText("Original task")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "done" }));
+    fireEvent.change(screen.getByPlaceholderText("https://github.com/..."), { target: { value: "Old evidence" } });
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), { target: { value: "Unsaved old edit" } });
+
+    mocked.wastelandState.active = "other/wl-commons";
+    setActiveUpstream("other/wl-commons");
+    view.rerender(<DetailTestApp />);
+    await waitFor(() => expect(screen.getByText("Other wasteland task")).toBeInTheDocument());
+    expect(screen.queryByRole("dialog", { name: "Edit item" })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("https://github.com/...")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "done" }));
+    expect(screen.getByPlaceholderText("https://github.com/...")).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "close" }));
+    expect(screen.getByRole("dialog", { name: "Confirmation" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("link", { name: "Next item" }));
+    await waitFor(() => expect(screen.getByText("Next task")).toBeInTheDocument());
+    expect(screen.queryByRole("dialog", { name: "Confirmation" })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("https://github.com/...")).not.toBeInTheDocument();
   });
 
   it("shows Edit button when canEdit is true", async () => {

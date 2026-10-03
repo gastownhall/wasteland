@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { createItem, updateItem } from "../api/client";
 import type { DetailResponse, MutationResponse, WantedItem } from "../api/types";
@@ -38,6 +38,14 @@ export function WantedForm({ item, mode = "default", onClose, onSaved }: WantedF
   const [tags, setTags] = useState(item?.tags?.join(", ") ?? "");
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
+  const mounted = useRef(false);
+
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   // Inference-mode state
   const [prompt, setPrompt] = useState("");
@@ -59,6 +67,7 @@ export function WantedForm({ item, mode = "default", onClose, onSaved }: WantedF
   });
 
   const handleSubmit = async () => {
+    if (!mounted.current) return;
     if (isInfer) {
       if (!prompt.trim() || !model.trim() || savingRef.current) return;
     } else {
@@ -82,7 +91,6 @@ export function WantedForm({ item, mode = "default", onClose, onSaved }: WantedF
           priority: 2,
           effort_level: "small",
         });
-        toast.success("Inference job posted");
       } else if (isEdit && item) {
         const parsedTags = tags
           .split(",")
@@ -98,7 +106,6 @@ export function WantedForm({ item, mode = "default", onClose, onSaved }: WantedF
           tags: parsedTags,
           tags_set: true,
         });
-        toast.success("Item updated");
       } else {
         const parsedTags = tags
           .split(",")
@@ -113,20 +120,23 @@ export function WantedForm({ item, mode = "default", onClose, onSaved }: WantedF
           effort_level: effortLevel,
           tags: parsedTags.length > 0 ? parsedTags : undefined,
         });
-        toast.success("Item posted");
       }
 
+      // Closing the modal during a save should still refresh its current parent.
+      onSaved(resp.detail ?? undefined);
+      if (!mounted.current) return;
+      toast.success(isInfer ? "Inference job posted" : isEdit ? "Item updated" : "Item posted");
       if (resp.detail?.pr_url) {
         toast.success(`PR submitted: ${resp.detail.pr_url}`);
       }
 
-      onSaved(resp.detail ?? undefined);
       onClose();
     } catch (e) {
+      if (!mounted.current) return;
       toast.error(e instanceof Error ? e.message : "Failed to save");
     } finally {
       savingRef.current = false;
-      setSaving(false);
+      if (mounted.current) setSaving(false);
     }
   };
 

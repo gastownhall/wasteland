@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useEffect, useOptimistic, useState } from "react";
+import { startTransition, useCallback, useEffect, useLayoutEffect, useOptimistic, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -40,8 +40,25 @@ const actionStatusMap: Record<string, string> = {
 
 export function DetailView() {
   const { id } = useParams<{ id: string }>();
+  const { active, ready } = useWasteland();
+  // Forms and pending callbacks belong to one item in one wasteland.
+  return <DetailContent key={JSON.stringify([id, active, ready])} />;
+}
+
+function DetailContent() {
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { active, ready, viewerRigHandle } = useWasteland();
+  const { ready, viewerRigHandle } = useWasteland();
+  const mounted = useRef(false);
+  const loadSequence = useRef(0);
+
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      loadSequence.current += 1;
+    };
+  }, []);
   const [data, setData] = useState<DetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -66,26 +83,27 @@ export function DetailView() {
   );
 
   const load = useCallback(async () => {
-    if (!id || !ready) return;
-    const currentUpstream = active;
-    void currentUpstream;
+    if (!mounted.current || !id || !ready) return;
+    const sequence = ++loadSequence.current;
+    const isCurrent = () => mounted.current && sequence === loadSequence.current;
     setLoading(true);
     setError("");
     try {
-      setData(await detail(id));
+      const response = await detail(id);
+      if (isCurrent()) setData(response);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load");
+      if (isCurrent()) setError(e instanceof Error ? e.message : "Failed to load");
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [active, id, ready]);
+  }, [id, ready]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   const handleAction = async (action: string) => {
-    if (!id || !data) return;
+    if (!mounted.current || !id || !data) return;
 
     const newStatus = actionStatusMap[action];
     if (newStatus) {
@@ -111,6 +129,7 @@ export function DetailView() {
           break;
         case "delete":
           await deleteItem(id);
+          if (!mounted.current) return;
           toast.success("Item deleted");
           navigate("/");
           return;
@@ -127,6 +146,7 @@ export function DetailView() {
         case "discard":
           if (data.branch) {
             await discardBranch(data.branch);
+            if (!mounted.current) return;
             toast.success("Changes discarded");
             navigate("/");
           }
@@ -134,6 +154,7 @@ export function DetailView() {
         default:
           return;
       }
+      if (!mounted.current) return;
       toast.success(`${action} successful`);
       // Use the detail from the mutation response to avoid a full refetch
       // (which would flash a skeleton loader).
@@ -143,6 +164,7 @@ export function DetailView() {
         await load();
       }
     } catch (e) {
+      if (!mounted.current) return;
       if (isConflictError(e)) {
         toast.error("This item was already claimed or changed by someone else");
         await load();
@@ -154,10 +176,11 @@ export function DetailView() {
   };
 
   const handleDone = async () => {
-    if (!id || !evidenceInput.trim() || doneSubmitting) return;
+    if (!mounted.current || !id || !evidenceInput.trim() || doneSubmitting) return;
     setDoneSubmitting(true);
     try {
       const result = await done(id, evidenceInput.trim());
+      if (!mounted.current) return;
       setShowDoneForm(false);
       setEvidenceInput("");
       toast.success("Submitted for review");
@@ -167,6 +190,7 @@ export function DetailView() {
         await load();
       }
     } catch (e) {
+      if (!mounted.current) return;
       if (isConflictError(e)) {
         toast.error("This item was already claimed or changed by someone else");
         await load();
@@ -174,17 +198,18 @@ export function DetailView() {
       }
       toast.error(e instanceof Error ? e.message : "Failed to submit");
     } finally {
-      setDoneSubmitting(false);
+      if (mounted.current) setDoneSubmitting(false);
     }
   };
 
   const handleAcceptSubmit = async (stamp: AcceptStampInput) => {
-    if (!id || !acceptTarget) return;
+    if (!mounted.current || !id || !acceptTarget) return;
     setAcceptSubmitting(true);
     try {
       const result = acceptTarget.isUpstream
         ? await acceptUpstream(id, { rig_handle: acceptTarget.rigHandle!, pr_url: acceptTarget.prURL }, stamp)
         : await accept(id, stamp);
+      if (!mounted.current) return;
       toast.success(
         acceptTarget.isUpstream ? `Accepted ${acceptTarget.rigHandle}'s submission` : "Accepted submission",
       );
@@ -195,6 +220,7 @@ export function DetailView() {
         await load();
       }
     } catch (e) {
+      if (!mounted.current) return;
       if (isConflictError(e)) {
         setAcceptTarget(null);
         toast.error("This item was already claimed or changed by someone else");
@@ -203,24 +229,27 @@ export function DetailView() {
       }
       toast.error(e instanceof Error ? e.message : "Failed to accept");
     } finally {
-      setAcceptSubmitting(false);
+      if (mounted.current) setAcceptSubmitting(false);
     }
   };
 
   const handleLoadDiff = async () => {
-    if (!data?.branch) return;
+    if (!mounted.current || !data?.branch) return;
     setDiffLoading(true);
     try {
       const resp = await branchDiff(data.branch);
+      if (!mounted.current) return;
       setDiffContent(resp.diff);
     } catch (e) {
+      if (!mounted.current) return;
       setDiffContent(`Error loading diff: ${e instanceof Error ? e.message : "unknown error"}`);
     } finally {
-      setDiffLoading(false);
+      if (mounted.current) setDiffLoading(false);
     }
   };
 
   const onActionClick = async (action: string) => {
+    if (!mounted.current) return;
     if (action === "done") {
       setShowDoneForm(true);
       return;
@@ -373,6 +402,7 @@ export function DetailView() {
                         <ActionButton
                           action="accept"
                           onAction={async () => {
+                            if (!mounted.current) return;
                             setAcceptTarget({
                               isUpstream,
                               rigHandle: pr.rig_handle,
@@ -385,6 +415,7 @@ export function DetailView() {
                       <ActionButton
                         action="reject"
                         onAction={async () => {
+                          if (!mounted.current) return;
                           try {
                             if (isUpstream) {
                               await rejectUpstream(id!, {
@@ -394,9 +425,11 @@ export function DetailView() {
                             } else {
                               await reject(id!);
                             }
+                            if (!mounted.current) return;
                             toast.success(`Rejected ${pr.rig_handle}'s submission`);
                             await load();
                           } catch (e) {
+                            if (!mounted.current) return;
                             toast.error(e instanceof Error ? e.message : "Failed to reject");
                           }
                         }}
@@ -405,6 +438,7 @@ export function DetailView() {
                         <ActionButton
                           action="close"
                           onAction={async () => {
+                            if (!mounted.current) return;
                             try {
                               const result = isUpstream
                                 ? await closeUpstream(id!, {
@@ -412,6 +446,7 @@ export function DetailView() {
                                     pr_url: pr.pr_url,
                                   })
                                 : await close(id!);
+                              if (!mounted.current) return;
                               toast.success(`Closed ${pr.rig_handle}'s submission`);
                               if (result?.detail) {
                                 setData(result.detail);
@@ -419,6 +454,7 @@ export function DetailView() {
                                 await load();
                               }
                             } catch (e) {
+                              if (!mounted.current) return;
                               toast.error(e instanceof Error ? e.message : "Failed to close");
                             }
                           }}
@@ -541,6 +577,7 @@ export function DetailView() {
           item={item}
           onClose={() => setShowEditForm(false)}
           onSaved={(detail) => {
+            if (!mounted.current) return;
             if (detail) setData(detail);
             else load();
           }}
@@ -552,6 +589,7 @@ export function DetailView() {
           message={`Are you sure you want to ${confirm} this item?`}
           onCancel={() => setConfirm(null)}
           onConfirm={async () => {
+            if (!mounted.current) return;
             const action = confirm;
             setConfirm(null);
             await handleAction(action);

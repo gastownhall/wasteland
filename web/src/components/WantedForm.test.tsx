@@ -1,8 +1,9 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setActiveUpstream } from "../api/client";
 import type { WantedItem } from "../api/types";
-import { mockFetch, renderWithRouter } from "../test-utils";
+import { makeDetailResponse, mockFetch, renderWithRouter } from "../test-utils";
 import { WantedForm } from "./WantedForm";
 
 const onClose = vi.fn();
@@ -14,6 +15,7 @@ afterEach(() => {
   localStorage.removeItem("wl_active");
   cleanupFetch?.();
   vi.clearAllMocks();
+  vi.restoreAllMocks();
 });
 
 function makeEditItem(): WantedItem {
@@ -79,6 +81,28 @@ describe("WantedForm", () => {
       expect(patchCalls.length).toBeGreaterThan(0);
       expect(patchCalls[0][0]).toBe("/api/wanted/item-1");
     });
+  });
+
+  it("delivers a completed edit after unmount without stale close callbacks or toasts", async () => {
+    setActiveUpstream("hop/wl-commons");
+    let resolveSave!: (response: object) => void;
+    const pendingSave = new Promise<object>((resolve) => {
+      resolveSave = resolve;
+    });
+    const toastSuccess = vi.spyOn(toast, "success");
+    const toastError = vi.spyOn(toast, "error");
+    cleanupFetch = mockFetch(() => pendingSave);
+    const view = renderWithRouter(<WantedForm item={makeEditItem()} onClose={onClose} onSaved={onSaved} />);
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+    view.unmount();
+    const savedDetail = makeDetailResponse({ pr_url: "https://example.com/pr/1" });
+
+    await act(async () => resolveSave({ detail: savedDetail }));
+
+    expect(onSaved).toHaveBeenCalledExactlyOnceWith(savedDetail);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(toastSuccess).not.toHaveBeenCalled();
+    expect(toastError).not.toHaveBeenCalled();
   });
 
   it("parses tags from comma-separated input", async () => {
