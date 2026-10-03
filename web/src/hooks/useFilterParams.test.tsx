@@ -22,13 +22,14 @@ describe("useFilterParams", () => {
 
   it("parses URL params into BrowseFilter", () => {
     const { result } = renderHook(() => useFilterParams(), {
-      wrapper: wrapperWithRoute("/?status=open&type=bug&sort=alpha&search=hello"),
+      wrapper: wrapperWithRoute("/?status=open&type=bug&sort=alpha&search=hello&project=gas%20city%2Fcore"),
     });
     const [filter] = result.current;
     expect(filter.status).toBe("open");
     expect(filter.type).toBe("bug");
     expect(filter.sort).toBe("alpha");
     expect(filter.search).toBe("hello");
+    expect(filter.project).toBe("gas city/core");
   });
 
   it("parses priority as number", () => {
@@ -51,11 +52,29 @@ describe("useFilterParams", () => {
     const { result } = renderHook(() => useFilterParams(), { wrapper });
     act(() => {
       const [, setFilter] = result.current;
-      setFilter({ status: "claimed", type: "feature" });
+      setFilter({ status: "claimed", type: "feature", project: "wasteland" });
     });
     const [filter] = result.current;
     expect(filter.status).toBe("claimed");
     expect(filter.type).toBe("feature");
+    expect(filter.project).toBe("wasteland");
+  });
+
+  it("keeps the project when changing another filter and allows clearing it", () => {
+    const { result } = renderHook(() => useFilterParams(), {
+      wrapper: wrapperWithRoute("/?project=gas%20city%2Fcore"),
+    });
+    act(() => {
+      const [filter, setFilter] = result.current;
+      setFilter({ ...filter, status: "open" });
+    });
+    expect(result.current[0]).toEqual({ project: "gas city/core", status: "open" });
+
+    act(() => {
+      const [filter, setFilter] = result.current;
+      setFilter({ ...filter, project: undefined });
+    });
+    expect(result.current[0]).toEqual({ status: "open" });
   });
 
   it("default sort 'priority' is omitted from URL", () => {
