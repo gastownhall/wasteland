@@ -2,6 +2,8 @@ module github.com/gastownhall/wasteland
 
 go 1.26.4
 
+toolchain go1.26.10
+
 require (
 	cloud.google.com/go/kms v1.27.0
 	github.com/charmbracelet/bubbles v1.0.0
