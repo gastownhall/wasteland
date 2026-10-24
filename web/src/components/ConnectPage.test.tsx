@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConnectSessionInput } from "../api/types";
 import { ConnectPage } from "./ConnectPage";
@@ -59,6 +59,11 @@ vi.mock("sonner", () => ({
   },
 }));
 
+function WantedProbe() {
+  const location = useLocation();
+  return <div data-testid="wanted">{`${location.pathname}${location.search}${location.hash}`}</div>;
+}
+
 function renderConnect(initialEntry: string) {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
@@ -66,11 +71,24 @@ function renderConnect(initialEntry: string) {
         <Route path="/connect" element={<ConnectPage />} />
         <Route path="/join" element={<ConnectPage />} />
         <Route path="/" element={<div data-testid="home">Home</div>} />
-        <Route path="/wanted/:id" element={<div data-testid="wanted">Wanted</div>} />
+        <Route path="/wanted/:id" element={<WantedProbe />} />
       </Routes>
     </MemoryRouter>,
   );
 }
+
+// Values the URL parser resolves off-origin (backslash, tab/newline) or into a
+// protocol-relative "//host" path once dot segments are normalized.
+const offOriginReturnTo = [
+  "//evil.example/x",
+  "/\\evil.example/x",
+  "/\t/evil.example/x",
+  "/\n/evil.example/x",
+  "/./\\evil.example/x",
+  "/..//evil.example/x",
+  "https://evil.example/x",
+  "javascript:alert(1)",
+];
 
 afterEach(() => {
   mocked.authStatus.mockReset();
@@ -110,6 +128,50 @@ describe("ConnectPage", () => {
 
     await waitFor(() => expect(screen.getByTestId("wanted")).toBeInTheDocument(), { timeout: 10000 });
   }, 15000);
+
+  it("keeps the query string and hash of a same-origin return_to", async () => {
+    mocked.authStatus.mockResolvedValue({
+      authenticated: true,
+      connected: true,
+      wastelands: [],
+    });
+
+    renderConnect(`/connect?return_to=${encodeURIComponent("/wanted/item-1?tab=history#c1")}`);
+
+    await waitFor(() => expect(screen.getByTestId("wanted")).toHaveTextContent("/wanted/item-1?tab=history#c1"), {
+      timeout: 10000,
+    });
+  }, 15000);
+
+  it.each(offOriginReturnTo)("redirects connected users to the board for off-origin return_to %j", async (value) => {
+    mocked.authStatus.mockResolvedValue({
+      authenticated: true,
+      connected: true,
+      wastelands: [],
+    });
+
+    renderConnect(`/connect?return_to=${encodeURIComponent(value)}`);
+
+    await waitFor(() => expect(screen.getByTestId("home")).toBeInTheDocument(), { timeout: 10000 });
+  }, 15000);
+
+  it.each(offOriginReturnTo)("cancels to the board for off-origin return_to %j", async (value) => {
+    mocked.authStatus.mockResolvedValue({
+      authenticated: false,
+      connected: false,
+      wastelands: [],
+    });
+
+    renderConnect(`/connect?return_to=${encodeURIComponent(value)}`);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument(), {
+      timeout: 5000,
+    });
+    expect(screen.queryByText("Sign in to continue.")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(screen.getByTestId("home")).toBeInTheDocument(), { timeout: 5000 });
+  }, 10000);
 
   it("stays on the join view when already connected and entering /join", async () => {
     mocked.authStatus.mockResolvedValue({
