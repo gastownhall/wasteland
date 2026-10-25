@@ -6,14 +6,35 @@ import { buildConnectTokenMetadata, redeemConnectToken } from "../api/directAuth
 import { useWasteland } from "../context/WastelandContext";
 import styles from "./ConnectPage.module.css";
 
+// sameOriginReturnTo accepts return_to only when it resolves to a path on this
+// origin. A string check alone is not enough: the URL parser treats "\" as "/"
+// and drops tab/newline characters, so "/\evil.example" resolves to another
+// host, and dot segments can normalize "/.//x" into a protocol-relative "//x".
+// The normalized path is returned so navigation uses exactly what was checked.
+function sameOriginReturnTo(raw: string | null): string | null {
+  if (!raw || !/^\/[^/\\]/.test(raw)) {
+    return null;
+  }
+  let target: URL;
+  try {
+    target = new URL(raw, window.location.origin);
+  } catch {
+    // An opaque origin ("null", e.g. a sandboxed frame) cannot anchor the check; fail closed.
+    return null;
+  }
+  if (target.origin !== window.location.origin || target.pathname.startsWith("//")) {
+    return null;
+  }
+  return `${target.pathname}${target.search}${target.hash}`;
+}
+
 export function ConnectPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const { refresh } = useWasteland();
 
-  const rawReturnTo = searchParams.get("return_to");
-  const returnTo = rawReturnTo && /^\/[^/]/.test(rawReturnTo) ? rawReturnTo : null;
+  const returnTo = sameOriginReturnTo(searchParams.get("return_to"));
   const reason = searchParams.get("reason");
   const [view, setView] = useState<"connect" | "join">("connect");
   const [loading, setLoading] = useState(true);
