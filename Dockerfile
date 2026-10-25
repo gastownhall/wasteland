@@ -22,7 +22,7 @@ RUN CGO_ENABLED=0 go build \
     -o /wl ./cmd/wl
 
 # Stage 3: Minimal runtime
-FROM gcr.io/distroless/static-debian12
+FROM gcr.io/distroless/static-debian13
 COPY --from=backend /wl /wl
 ENTRYPOINT ["/wl"]
 CMD ["serve", "--hosted"]
