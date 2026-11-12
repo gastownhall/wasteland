@@ -30,6 +30,10 @@ func TestQueryScoreboardDump_Basic(t *testing.T) {
 	if dump.Rigs[0].DisplayName != "Alice Chen" {
 		t.Errorf("rig display_name = %q, want Alice Chen", dump.Rigs[0].DisplayName)
 	}
+	// alice has 1 root stamp (weight=5) → newcomer tier
+	if dump.Rigs[0].TrustTier != "newcomer" {
+		t.Errorf("rig trust_tier = %q, want newcomer", dump.Rigs[0].TrustTier)
+	}
 
 	if len(dump.Stamps) != 1 {
 		t.Fatalf("stamps count = %d, want 1", len(dump.Stamps))
