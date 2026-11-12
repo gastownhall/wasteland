@@ -233,20 +233,6 @@ func RemoteBranchExists(dbDir, remoteBranch string) (bool, error) {
 	}
 	return strings.TrimSpace(lines[1]) != "0", nil
 }
-
-// MergeRemoteTracking merges the origin remote tracking branch into the
-// currently checked-out local branch. If the remote tracking branch doesn't
-// exist or the merge fails, this is a best-effort no-op. Used in PR mode to
-// bring stale local branches up to date with origin's data.
-func MergeRemoteTracking(dbDir, branch string) error {
-	remoteBranch := "remotes/origin/" + branch
-	exists, err := RemoteBranchExists(dbDir, remoteBranch)
-	if err != nil || !exists {
-		return nil
-	}
-	return doltExec(dbDir, "merge", remoteBranch)
-}
-
 // CheckoutBranchFrom checks out a branch if it exists, or creates it from
 // startPoint if it doesn't. Used in PR mode so new branches start from a
 // clean upstream-aligned main, while existing branches (with pending
